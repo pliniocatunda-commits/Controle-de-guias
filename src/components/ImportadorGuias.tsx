@@ -128,8 +128,11 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
           return next;
         });
 
-        // Simulação de Link (Bypass Storage Upload para evitar travas de rede)
-        const url = "arquivos_manuais/" + currentFile.file.name;
+        // 3. Upload para Firebase Storage (Real)
+        const storagePath = `guias/importacao/${selectedDeptId}/${competenciaAno}/${competenciaMes}/${detectedType}_${Date.now()}_${index}.pdf`;
+        const storageRef = ref(storage, storagePath);
+        const uploadResult = await uploadBytes(storageRef, currentFile.file);
+        const url = await getDownloadURL(uploadResult.ref);
 
         console.log("4. Persistindo dados no Firestore...");
         if (detectedType === 'guia') {

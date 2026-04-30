@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Guia, Departamento, Comprovante } from '../types';
 import { 
   FileText, Calendar, DollarSign, Tag, Search, 
@@ -109,11 +110,20 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
     if (!file || !uploadContext) return;
 
     try {
+      setLoading(true);
+
+      // Upload para Firebase Storage
+      const storagePath = `guias/global/${uploadContext.deptId}/${anoFiscal}/${mesReferencia}/${uploadContext.tipo}_${uploadContext.target}_${Date.now()}.pdf`;
+      const storageRef = ref(storage, storagePath);
+      
+      const uploadResult = await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(uploadResult.ref);
+
       let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
       const urlFieldName = uploadContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
       
       const payload: any = {
-        [urlFieldName]: 'arquivos_manuais/' + file.name,
+        [urlFieldName]: downloadUrl,
         updatedAt: serverTimestamp()
       };
 
@@ -144,11 +154,12 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
         setGuias(prev => [...prev, { id: docRef.id, ...newDoc } as Guia]);
       }
       
-      showAlert("Sucesso", "Documento enviado com sucesso!", "success");
+      showAlert("Sucesso", "Documento enviado e salvo com sucesso!", "success");
     } catch (error) {
       console.error(error);
-      showAlert("Erro", "Falha ao enviar arquivo.", "danger");
+      showAlert("Erro", "Falha ao enviar arquivo para o armazenamento.", "danger");
     } finally {
+      setLoading(false);
       setUploadContext(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -176,6 +187,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
       showAlert("Documento não encontrado", "Este registro não possui um arquivo PDF anexo para visualização.", "info");
       return;
     }
+
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 

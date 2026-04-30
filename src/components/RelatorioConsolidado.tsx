@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Departamento, Guia, Secretaria } from '../types';
 import { 
   FileText, CheckCircle, Clock, Search, 
@@ -113,11 +114,20 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
     if (!file || !uploadContext) return;
 
     try {
+      setLoading(true);
+      
+      // Upload para Firebase Storage
+      const storagePath = `guias/${secretariaId}/${uploadContext.deptId}/${ano}/${mes}/${uploadContext.tipo}_${uploadContext.target}_${Date.now()}.pdf`;
+      const storageRef = ref(storage, storagePath);
+      
+      const uploadResult = await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(uploadResult.ref);
+
       let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
       const urlFieldName = uploadContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
       
       const payload: any = {
-        [urlFieldName]: 'arquivos_manuais/' + file.name,
+        [urlFieldName]: downloadUrl,
         updatedAt: serverTimestamp()
       };
 
@@ -147,11 +157,12 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
         const docRef = await addDoc(collection(db, 'guias'), newDoc);
         setGuias(prev => [...prev, { id: docRef.id, ...newDoc } as Guia]);
       }
-      showAlert("Sucesso", "Documento enviado com sucesso!", "success");
+      showAlert("Sucesso", "Documento enviado e salvo com sucesso!", "success");
     } catch (error) {
       console.error(error);
-      showAlert("Erro", "Falha ao enviar arquivo.", "danger");
+      showAlert("Erro", "Falha ao enviar arquivo para o armazenamento.", "danger");
     } finally {
+      setLoading(false);
       setUploadContext(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -183,6 +194,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
       showAlert("Documento não encontrado", "Este registro não possui um arquivo PDF anexo para visualização.", "info");
       return;
     }
+
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
