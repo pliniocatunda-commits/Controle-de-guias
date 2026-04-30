@@ -183,10 +183,6 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
       showAlert("Documento não encontrado", "Este registro não possui um arquivo PDF anexo para visualização.", "info");
       return;
     }
-    if (url.startsWith('arquivos_manuais/')) {
-       showAlert("Apenas Demo", "Este é um arquivo de demonstração. Em produção, você veria o PDF original aqui.", "info");
-       return;
-    }
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
