@@ -60,7 +60,18 @@ export default function App() {
     });
   }, []);
 
-  const handleLogin = () => signInWithPopup(auth, googleProvider);
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error: any) {
+      console.error("Erro no login:", error);
+      if (error.code === 'auth/unauthorized-domain') {
+        alert("Este domínio não está autorizado no Firebase Console. Por favor, adicione as URLs do app em Authentication > Settings > Authorized domains.");
+      } else {
+        alert("Erro ao entrar com Google: " + error.message);
+      }
+    }
+  };
   const handleLogout = () => signOut(auth);
 
   const resetSelection = () => {
