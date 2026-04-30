@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserData().role == 'admin';
+    }
+
+    function isSecretariaAdmin(secretariaId) {
+      let userData = getUserData();
+      return isSignedIn() && userData.role == 'secretaria_admin' && userData.secretariaId == secretariaId;
+    }
+
+    function isDepartamentoUser(departamentoId) {
+      let userData = getUserData();
+      return isSignedIn() && userData.role == 'departamento_user' && userData.departamentoId == departamentoId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validations ---
+    function isValidSecretaria(data) {
+      return data.keys().hasAll(['nome', 'sigla']) &&
+             data.keys().size() >= 2 &&
+             data.nome is string && data.nome.size() <= 200 &&
+             data.sigla is string && data.sigla.size() <= 20;
+    }
+
+    function isValidDepartamento(data) {
+      return data.keys().hasAll(['nome', 'secretariaId']) &&
+             data.keys().size() >= 2 &&
+             data.nome is string && data.nome.size() <= 200 &&
+             isValidId(data.secretariaId);
+    }
+
+    function isValidGuia(data) {
+      return data.keys().hasAll(['departamentoId', 'mes', 'ano', 'valor', 'vencimento', 'status']) &&
+             data.departamentoId is string &&
+             data.mes is int && data.mes >= 1 && data.mes <= 12 &&
+             data.ano is int && data.ano >= 2000 && data.ano <= 2100 &&
+             data.valor is number &&
+             data.status in ['pendente', 'pago', 'atrasado'] &&
+             (data.keys().hasAny(['nome']) ? data.nome is string : true);
+    }
+
+    function isValidComprovante(data) {
+      return data.keys().hasAll(['dataPagamento', 'valorPago', 'urlComprovante']) &&
+             data.valorPago is number;
+    }
+
+    function isValidUsuario(data) {
+      return data.keys().hasAll(['nome', 'email', 'role']) &&
+             data.nome is string &&
+             data.email is string &&
+             data.role in ['admin', 'secretaria_admin', 'departamento_user'];
+    }
+
+    // --- Collection Rules ---
+
+    match /usuarios/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUsuario(incoming());
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['nome'])) ||
+        isAdmin()
+      );
+    }
+
+    match /secretarias/{secId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin() && isValidSecretaria(incoming());
+    }
+
+    match /departamentos/{deptId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin() && isValidDepartamento(incoming());
+    }
+
+    match /guias/{guiaId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidGuia(incoming()) && (
+        isAdmin() || 
+        isSecretariaAdmin(get(/databases/$(database)/documents/departamentos/$(incoming().departamentoId)).data.secretariaId) ||
+        isDepartamentoUser(incoming().departamentoId)
+      );
+      allow update: if isSignedIn() && isValidGuia(incoming()) && (
+        isAdmin() ||
+        isSecretariaAdmin(get(/databases/$(database)/documents/departamentos/$(existing().departamentoId)).data.secretariaId) ||
+        isDepartamentoUser(existing().departamentoId)
+      );
+      allow delete: if isSignedIn(); // Relaxed for troubleshooting
+    }
+
+    match /comprovantes/{compId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidComprovante(incoming()) && (
+        isAdmin() ||
+        isDepartamentoUser(get(/databases/$(database)/documents/guias/$(incoming().guiaId)).data.departamentoId)
+      );
+      allow update: if isSignedIn() && isValidComprovante(incoming()) && isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

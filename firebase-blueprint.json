@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "Secretaria": {
+      "title": "Secretaria",
+      "description": "Entidade que representa uma Secretaria do governo ou organização.",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string", "description": "Nome completo da secretaria" },
+        "sigla": { "type": "string", "description": "Sigla da secretaria" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nome", "sigla"]
+    },
+    "Departamento": {
+      "title": "Departamento",
+      "description": "Unidade administrativa vinculada a uma Secretaria.",
+      "type": "object",
+      "properties": {
+        "secretariaId": { "type": "string", "description": "ID da secretaria pai" },
+        "nome": { "type": "string", "description": "Nome do departamento" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["secretariaId", "nome"]
+    },
+    "Guia": {
+      "title": "Guia Previdenciária",
+      "description": "Documento de cobrança previdenciária mensal (Patronal ou Segurado).",
+      "type": "object",
+      "properties": {
+        "departamentoId": { "type": "string", "description": "ID do departamento responsável" },
+        "mes": { "type": "integer", "description": "Mês de referência (1-12)" },
+        "ano": { "type": "integer", "description": "Ano de referência" },
+        "valor": { "type": "number", "description": "Valor nominal da guia (Líquido)" },
+        "vencimento": { "type": "string", "format": "date-time", "description": "Data de vencimento" },
+        "status": { "type": "string", "enum": ["pendente", "pago", "atrasado"], "description": "Status do pagamento" },
+        "urlGuia": { "type": "string", "description": "Link para o documento da guia original" },
+        "urlComprovante": { "type": "string", "description": "Link para o comprovante de pagamento" },
+        "tipo": { "type": "string", "enum": ["patronal", "segurado"], "description": "Tipo da guia" },
+        "identificacaoGrcp": { "type": "string", "description": "Código de identificação GRCP" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["departamentoId", "mes", "ano", "valor", "vencimento", "status", "tipo"]
+    },
+    "Comprovante": {
+      "title": "Comprovante de Pagamento",
+      "description": "Evidência de que uma ou mais guias foram pagas (Individual ou Agrupado por Secretaria).",
+      "type": "object",
+      "properties": {
+        "guiaId": { "type": "string", "description": "ID da guia (opcional se for aggregate)" },
+        "secretariaId": { "type": "string", "description": "ID da secretaria (para pagamentos unificados)" },
+        "mes": { "type": "integer" },
+        "ano": { "type": "integer" },
+        "dataPagamento": { "type": "string", "format": "date-time" },
+        "valorPago": { "type": "number" },
+        "urlComprovante": { "type": "string" },
+        "observacoes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["dataPagamento", "valorPago", "urlComprovante"]
+    },
+    "Usuario": {
+      "title": "Usuário",
+      "description": "Perfil de acesso ao sistema.",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "secretaria_admin", "departamento_user"] },
+        "secretariaId": { "type": "string", "description": "ID da secretaria (opcional, para secretaria_admin)" },
+        "departamentoId": { "type": "string", "description": "ID do departamento (opcional, para departamento_user)" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nome", "email", "role"]
+    }
+  },
+  "firestore": {
+    "secretarias": {
+      "schema": "Secretaria",
+      "description": "Coleção de secretarias do sistema."
+    },
+    "departamentos": {
+      "schema": "Departamento",
+      "description": "Coleção de departamentos vinculados a secretarias."
+    },
+    "guias": {
+      "schema": "Guia",
+      "description": "Coleção de guias previdenciárias."
+    },
+    "comprovantes": {
+      "schema": "Comprovante",
+      "description": "Coleção de comprovantes de pagamento."
+    },
+    "usuarios": {
+      "schema": "Usuario",
+      "description": "Coleção de perfis de usuário."
+    }
+  }
+}
