@@ -65,8 +65,11 @@ export default function App() {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error("Erro no login:", error);
+      const currentDomain = window.location.hostname;
       if (error.code === 'auth/unauthorized-domain') {
-        alert("Este domínio não está autorizado no Firebase Console. Por favor, adicione as URLs do app em Authentication > Settings > Authorized domains.");
+        alert(`O domínio atual (${currentDomain}) não está autorizado no Firebase Console.\n\nPor favor, certifique-se de que '${currentDomain}' está na lista de 'Authorized domains' em Authentication > Settings no seu projeto Firebase.`);
+      } else if (error.code === 'auth/popup-blocked') {
+        alert("O login foi bloqueado pelo seu navegador. Por favor, tente abrir o aplicativo em uma nova aba usando o botão no canto superior direito.");
       } else {
         alert("Erro ao entrar com Google: " + error.message);
       }
