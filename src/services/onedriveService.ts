@@ -68,7 +68,13 @@ export const onedriveService = {
         }
         return null;
       }
-      return await res.json();
+      const data = await res.json();
+      if (data && (data.error || !data.displayName)) {
+        localStorage.removeItem('onedrive_token');
+        localStorage.removeItem('onedrive_refresh_token');
+        return null;
+      }
+      return data;
     } catch {
       return null;
     }
@@ -83,8 +89,17 @@ export const onedriveService = {
   async listFiles(folderId?: string): Promise<DriveItem[]> {
     const url = folderId ? `/api/onedrive/files?folderId=${folderId}` : '/api/onedrive/files';
     const res = await apiFetch(url);
-    if (!res.ok) throw new Error('Falha ao listar arquivos do OneDrive.');
+    if (!res.ok) {
+      if (res.status === 401) {
+        localStorage.removeItem('onedrive_token');
+        localStorage.removeItem('onedrive_refresh_token');
+      }
+      throw new Error('Falha ao listar arquivos do OneDrive: ' + res.status);
+    }
     const data = await res.json();
+    if (data && data.error) {
+      throw new Error(data.error.message || 'Erro do OneDrive ao listar arquivos.');
+    }
     return data.value || [];
   },
 

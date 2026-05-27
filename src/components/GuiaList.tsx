@@ -59,6 +59,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
   const [loading, setLoading] = useState(true);
   const [mesReferencia, setMesReferencia] = useState(new Date().getMonth() + 1);
   const [anoFiscal, setAnoFiscal] = useState(new Date().getFullYear());
+  const [activeRegime, setActiveRegime] = useState<'capitalizado' | 'financeiro'>('capitalizado');
   const [oneDrivePickContext, setOneDrivePickContext] = useState<{deptId: string, tipo: 'patronal' | 'segurado', target: 'guia' | 'comprovante'} | null>(null);
   
   // Modal Control
@@ -156,7 +157,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
     if (!file || !uploadContext) return;
 
     // Abrir modal de conferência
-    const existingGuia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
+    const existingGuia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo && (g.regime || 'capitalizado') === activeRegime);
     const initialVal = uploadContext.target === 'guia' ? (existingGuia?.valor || 0) : (existingGuia?.valorPago || existingGuia?.valor || 0);
     setPendingFile(file);
     setUploadForm({
@@ -177,7 +178,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
       // Upload para Firebase Storage
       const downloadUrl = await uploadFile(pendingFile, 'guias');
 
-      let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
+      let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo && (g.regime || 'capitalizado') === activeRegime);
       const urlFieldName = uploadContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
       
       const payload: any = {
@@ -202,6 +203,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
           tipo: uploadContext.tipo,
           mes: mesReferencia,
           ano: anoFiscal,
+          regime: activeRegime,
           nome: pendingFile.name.split('.')[0],
           valor: uploadContext.target === 'guia' ? uploadForm.valor : 0,
           valorPago: uploadContext.target === 'comprovante' ? uploadForm.valor : 0,
@@ -291,7 +293,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
   };
 
   const getGuiaData = (deptId: string, tipo: 'patronal' | 'segurado') => {
-    return guias.find(g => g.departamentoId === deptId && g.tipo === tipo);
+    return guias.find(g => g.departamentoId === deptId && g.tipo === tipo && (g.regime || 'capitalizado') === activeRegime);
   };
 
   return (
@@ -341,6 +343,32 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
       </div>
 
       <div className="p-6 max-w-[1600px] mx-auto">
+        {/* Regime Selection Switcher */}
+        <div className="flex gap-1.5 mb-6 bg-white p-1.5 rounded-2xl w-fit border border-gray-200 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setActiveRegime('capitalizado')}
+            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+              activeRegime === 'capitalizado'
+                ? 'bg-gray-900 text-white shadow-md'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Capitalizado
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveRegime('financeiro')}
+            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+              activeRegime === 'financeiro'
+                ? 'bg-gray-900 text-white shadow-md'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Financeiro
+          </button>
+        </div>
+
         <div className="bg-white rounded-3xl shadow-md border border-gray-200 overflow-hidden overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
@@ -639,7 +667,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
                   try {
                     setLoading(true);
                     const dept = departamentos.find(d => d.id === oneDrivePickContext.deptId);
-                    const existingGuia = guias.find(g => g.departamentoId === oneDrivePickContext.deptId && g.tipo === oneDrivePickContext.tipo);
+                    const existingGuia = guias.find(g => g.departamentoId === oneDrivePickContext.deptId && g.tipo === oneDrivePickContext.tipo && (g.regime || 'capitalizado') === activeRegime);
                     
                     const urlFieldName = oneDrivePickContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
                     const payload: any = {
@@ -656,6 +684,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
                         tipo: oneDrivePickContext.tipo,
                         mes: mesReferencia,
                         ano: anoFiscal,
+                        regime: activeRegime,
                         nome: file.name.split('.')[0],
                         valor: 0,
                         valorPago: 0,
@@ -758,7 +787,7 @@ export default function GuiaList({ departamentoId, onBack }: { departamentoId?: 
                   <button 
                     onClick={handleConfirmUpload}
                     disabled={loading}
-                    className="flex-1 bg-black text-white px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-800 transition-all shadow-lg shadow-black/10 disabled:opacity-50"
+                    className="flex-1 bg-blue-600 text-white px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/15 disabled:opacity-50 cursor-pointer"
                   >
                     {loading ? 'Subindo...' : 'Confirmar e Enviar'}
                   </button>

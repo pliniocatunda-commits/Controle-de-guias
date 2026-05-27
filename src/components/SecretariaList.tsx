@@ -6,7 +6,7 @@ import { Building2, Plus, ChevronRight, Search, Pencil, Trash2 } from 'lucide-re
 import { motion } from 'motion/react';
 import ModalConfirmacao from './ModalConfirmacao';
 
-export default function SecretariaList({ onSelect }: { onSelect: (id: string) => void }) {
+export default function SecretariaList({ onSelect, onSelectDepartments }: { onSelect: (id: string) => void; onSelectDepartments?: (id: string) => void }) {
   const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -83,7 +83,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
         </div>
         <button 
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-[#141414] text-white rounded-lg hover:bg-black transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/10 cursor-pointer text-sm font-semibold"
         >
           <Plus className="w-4 h-4" /> Nova Secretaria
         </button>
@@ -114,7 +114,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                 className="flex items-center justify-between p-4 cursor-pointer group transition-colors"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-[#141414] font-bold">
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold border border-blue-100">
                     {sec.sigla[0]}
                   </div>
                   <div>
@@ -124,6 +124,14 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                 </div>
                 
                 <div className="flex items-center gap-2">
+                  {onSelectDepartments && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onSelectDepartments(sec.id); }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-xl transition-all font-bold text-[11px] uppercase tracking-wider cursor-pointer active:scale-95 hover:shadow-sm mr-2 z-10"
+                    >
+                      <Building2 className="w-3.5 h-3.5 text-gray-500" /> Departamentos
+                    </button>
+                  )}
                   <button 
                     onClick={(e) => { e.stopPropagation(); setEditingSec(sec); }}
                     className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
@@ -165,7 +173,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                   type="text" 
                   value={editingSec.nome}
                   onChange={e => setEditingSec({...editingSec, nome: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-black outline-none"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
                 />
               </div>
               <div>
@@ -174,7 +182,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                   type="text" 
                   value={editingSec.sigla}
                   onChange={e => setEditingSec({...editingSec, sigla: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-black outline-none"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
                 />
               </div>
             </div>
@@ -187,7 +195,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
               </button>
               <button 
                 onClick={handleUpdate}
-                className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-md shadow-blue-500/10 font-semibold"
               >
                 Salvar Alterações
               </button>
@@ -206,7 +214,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                   type="text" 
                   value={newSec.nome}
                   onChange={e => setNewSec({...newSec, nome: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-black outline-none"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
                   placeholder="Ex: Secretaria da Fazenda"
                 />
               </div>
@@ -216,7 +224,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
                   type="text" 
                   value={newSec.sigla}
                   onChange={e => setNewSec({...newSec, sigla: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-black outline-none"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
                   placeholder="Ex: SEFAZ"
                 />
               </div>
@@ -230,7 +238,7 @@ export default function SecretariaList({ onSelect }: { onSelect: (id: string) =>
               </button>
               <button 
                 onClick={handleAdd}
-                className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-md shadow-blue-500/10 font-semibold"
               >
                 Salvar
               </button>

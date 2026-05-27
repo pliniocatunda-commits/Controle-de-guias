@@ -7,7 +7,8 @@ import {
   FileText, CheckCircle, Clock, Search, 
   ArrowLeft, Download, Eye, Calendar,
   Table as TableIcon, Filter, LayoutGrid, FileSearch,
-  Plus, UploadCloud, X, Minus, RotateCcw, Cloud, Folder, File, Link as LinkIcon
+  Plus, UploadCloud, X, Minus, RotateCcw, Cloud, Folder, File, Link as LinkIcon,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -66,6 +67,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
   const [mes, setMes] = useState(new Date().getMonth() + 1);
   const [ano, setAno] = useState(new Date().getFullYear());
   const [tempValues, setTempValues] = useState<Record<string, string>>({});
+  const [activeRegime, setActiveRegime] = useState<'capitalizado' | 'financeiro'>('capitalizado');
   
   // OneDrive connection and selection states
   const [onedriveConnected, setOnedriveConnected] = useState<boolean>(false);
@@ -170,7 +172,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
     setLinkingOdInProgress(true);
     try {
       const { deptId, tipo, target } = linkContext;
-      let guia = guias.find(g => g.departamentoId === deptId && g.tipo === tipo);
+      let guia = guias.find(g => g.departamentoId === deptId && g.tipo === tipo && (g.regime || 'capitalizado') === activeRegime);
       const urlFieldName = target === 'guia' ? 'urlGuia' : 'urlComprovante';
       const valorNum = parseBRLToFloat(odFormValor);
 
@@ -196,6 +198,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
           tipo: tipo,
           mes: mes,
           ano: ano,
+          regime: activeRegime,
           nome: selectedOdFile.name.split('.')[0],
           valor: target === 'guia' ? valorNum : 0,
           valorPago: target === 'comprovante' ? valorNum : 0,
@@ -268,7 +271,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
     if (!file || !uploadContext) return;
 
     // Em vez de subir direto, abre o modal de preenchimento
-    const existingGuia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
+    const existingGuia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo && (g.regime || 'capitalizado') === activeRegime);
     const initialVal = uploadContext.target === 'guia' ? (existingGuia?.valor || 0) : (existingGuia?.valorPago || existingGuia?.valor || 0);
     setPendingFile(file);
     setUploadForm({
@@ -289,7 +292,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
       // Upload para Firebase Storage
       const downloadUrl = await uploadFile(pendingFile, 'guias');
 
-      let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
+      let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo && (g.regime || 'capitalizado') === activeRegime);
       const urlFieldName = uploadContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
       
       const payload: any = {
@@ -314,6 +317,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
           tipo: uploadContext.tipo,
           mes: mes,
           ano: ano,
+          regime: activeRegime,
           nome: pendingFile.name.split('.')[0],
           valor: uploadContext.target === 'guia' ? uploadForm.valor : 0,
           valorPago: uploadContext.target === 'comprovante' ? uploadForm.valor : 0,
@@ -368,7 +372,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
   };
 
   const getGuiaForDept = (deptId: string, tipo: 'patronal' | 'segurado') => {
-    return guias.find(g => g.departamentoId === deptId && g.tipo === tipo);
+    return guias.find(g => g.departamentoId === deptId && g.tipo === tipo && (g.regime || 'capitalizado') === activeRegime);
   };
 
   const openDocument = (url: string | undefined) => {
@@ -425,7 +429,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
             </p>
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex items-center gap-4">
             <div className="bg-white p-3 px-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-6">
                <div className="text-right">
                   <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-0.5">MÊS</p>
@@ -455,6 +459,32 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
       </div>
 
       <div className="p-6 max-w-[1600px] mx-auto">
+        {/* Regime Selection Switcher */}
+        <div className="flex gap-1.5 mb-6 bg-white p-1.5 rounded-2xl w-fit border border-gray-200 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setActiveRegime('capitalizado')}
+            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+              activeRegime === 'capitalizado'
+                ? 'bg-gray-900 text-white shadow-md'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Capitalizado
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveRegime('financeiro')}
+            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+              activeRegime === 'financeiro'
+                ? 'bg-gray-900 text-white shadow-md'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Financeiro
+          </button>
+        </div>
+
         <div className="bg-white rounded-3xl shadow-md border border-gray-200 overflow-hidden overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
@@ -767,14 +797,14 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
            <div className="text-center md:text-left">
              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Total Patronal</p>
              <p className="text-xl font-black text-blue-600">
-               R$ {guias.filter(g => g.tipo === 'patronal').reduce((acc, g) => acc + g.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+               R$ {guias.filter(g => g.tipo === 'patronal' && (g.regime || 'capitalizado') === activeRegime && departamentos.some(d => d.id === g.departamentoId)).reduce((acc, g) => acc + g.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
              </p>
            </div>
            <div className="w-px h-8 bg-gray-100" />
            <div className="text-center md:text-left">
              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Total Segurados</p>
              <p className="text-xl font-black text-emerald-600">
-               R$ {guias.filter(g => g.tipo === 'segurado').reduce((acc, g) => acc + g.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+               R$ {guias.filter(g => g.tipo === 'segurado' && (g.regime || 'capitalizado') === activeRegime && departamentos.some(d => d.id === g.departamentoId)).reduce((acc, g) => acc + g.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
              </p>
            </div>
         </div>
@@ -865,7 +895,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
                   <button 
                     onClick={handleConfirmUpload}
                     disabled={loading}
-                    className="flex-1 bg-black text-white px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-800 transition-all shadow-lg shadow-black/10 disabled:opacity-50"
+                    className="flex-1 bg-blue-600 text-white px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/15 disabled:opacity-50 cursor-pointer"
                   >
                     {loading ? 'Subindo...' : 'Confirmar e Enviar'}
                   </button>

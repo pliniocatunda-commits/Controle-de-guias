@@ -261,6 +261,9 @@ async function startServer() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
+      if (!response.ok) {
+        return res.status(response.status).json(data);
+      }
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Erro ao buscar dados do usuário" });
@@ -282,6 +285,9 @@ async function startServer() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
+      if (!response.ok) {
+        return res.status(response.status).json(data);
+      }
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Erro ao listar arquivos" });

@@ -44,7 +44,7 @@ export default function ModalConfirmacao({
     },
     info: {
       icon: <HelpCircle className="w-8 h-8 text-blue-500" />,
-      button: 'bg-black hover:bg-gray-800 shadow-gray-200',
+      button: 'bg-blue-600 hover:bg-blue-700 shadow-blue-200',
       bg: 'bg-blue-50',
       text: 'text-blue-900'
     }

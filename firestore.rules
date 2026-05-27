@@ -92,12 +92,15 @@ service cloud.firestore {
 
     match /secretarias/{secId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin() && isValidSecretaria(incoming());
+      allow create, update: if isAdmin() && isValidSecretaria(incoming());
+      allow delete: if isAdmin();
     }
 
     match /departamentos/{deptId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin() && isValidDepartamento(incoming());
+      allow create: if (isAdmin() || isSecretariaAdmin(incoming().secretariaId)) && isValidDepartamento(incoming());
+      allow update: if (isAdmin() || (isSecretariaAdmin(existing().secretariaId) && isSecretariaAdmin(incoming().secretariaId))) && isValidDepartamento(incoming());
+      allow delete: if isAdmin() || isSecretariaAdmin(existing().secretariaId);
     }
 
     match /guias/{guiaId} {

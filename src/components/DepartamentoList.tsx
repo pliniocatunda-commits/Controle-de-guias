@@ -171,9 +171,11 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       });
       setShowAddModal(false);
       setNewDeptName('');
+      showAlert("Sucesso", "Departamento cadastrado com sucesso!", "success");
       fetchDepartamentos();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Não foi possível cadastrar o departamento. Verifique suas permissões.", "danger");
     }
   };
 
@@ -187,9 +189,11 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       });
       setEditingDept(null);
       setShowOneDriveLinker(false);
+      showAlert("Sucesso", "Departamento atualizado com sucesso!", "success");
       fetchDepartamentos();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Não foi possível atualizar o departamento. Verifique suas permissões.", "danger");
     }
   };
 
@@ -202,9 +206,11 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       async () => {
         try {
           await deleteDoc(doc(db, 'departamentos', id));
+          showAlert("Sucesso", "Departamento excluído com sucesso!", "success");
           fetchDepartamentos();
         } catch (error) {
           console.error(error);
+          showAlert("Erro", "Não foi possível excluir o departamento. Verifique suas permissões.", "danger");
         }
       }
     );
@@ -235,7 +241,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
           </button>
           <button 
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#141414] text-white rounded-xl hover:bg-black transition-all shadow-lg shadow-black/10 font-bold text-sm"
+            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold text-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Novo Departamento
           </button>
@@ -490,7 +496,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
               </button>
               <button 
                 onClick={handleUpdate}
-                className="flex-1 py-3 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors font-bold text-sm"
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-bold text-sm shadow-md shadow-blue-500/10 cursor-pointer"
               >
                 SALVAR ALTERAÇÕES
               </button>
@@ -511,7 +517,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                   type="text" 
                   value={newDeptName}
                   onChange={e => setNewDeptName(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-black outline-none font-medium"
+                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-blue-600 outline-none font-medium"
                   placeholder="Ex: Recursos Humanos"
                 />
               </div>
@@ -525,7 +531,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
               </button>
               <button 
                 onClick={handleAdd}
-                className="flex-1 py-3 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors font-bold text-sm"
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-bold text-sm shadow-md shadow-blue-500/10 cursor-pointer"
               >
                 CRIAR UNIDADE
               </button>

@@ -35,6 +35,7 @@ export default function Dashboard() {
   // Filters state (defaults to current month and year)
   const [selectedMes, setSelectedMes] = useState<number | 'todos'>(new Date().getMonth() + 1);
   const [selectedAno, setSelectedAno] = useState<number | 'todos'>(new Date().getFullYear());
+  const [selectedRegime, setSelectedRegime] = useState<'todos' | 'capitalizado' | 'financeiro'>('todos');
 
   useEffect(() => {
     async function fetchData() {
@@ -102,13 +103,17 @@ export default function Dashboard() {
   const filteredGuias = allGuias.filter(g => {
     const matchMes = selectedMes === 'todos' || g.mes === selectedMes;
     const matchAno = selectedAno === 'todos' || g.ano === selectedAno;
-    return matchMes && matchAno;
+    const matchRegime = selectedRegime === 'todos' || (g.regime || 'capitalizado') === selectedRegime;
+    return matchMes && matchAno && matchRegime;
   });
 
   const filteredComprovantes = allComprovantes.filter(c => {
     const matchMes = selectedMes === 'todos' || c.mes === selectedMes;
     const matchAno = selectedAno === 'todos' || c.ano === selectedAno;
-    return matchMes && matchAno;
+    const linkedGuia = c.guiaId ? allGuias.find(g => g.id === c.guiaId) : null;
+    const compRegime = c.regime || (linkedGuia && linkedGuia.regime) || 'capitalizado';
+    const matchRegime = selectedRegime === 'todos' || compRegime === selectedRegime;
+    return matchMes && matchAno && matchRegime;
   });
 
   // Calculate high-level KPIs based on the filtered records
@@ -183,7 +188,7 @@ export default function Dashboard() {
             }}
             className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-semibold transition-colors shadow-sm uppercase tracking-wider text-[11px] ${
               selectedMes === 'todos' && selectedAno === 'todos'
-                ? 'bg-[#141414] text-white border-transparent'
+                ? 'bg-blue-600 text-white border-transparent hover:bg-blue-700'
                 : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
             }`}
           >
@@ -193,17 +198,17 @@ export default function Dashboard() {
       </header>
 
       {/* Filter Row */}
-      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row gap-5 items-start sm:items-center justify-between">
-        <div className="flex flex-wrap gap-4 items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest text-[10px]">Mês de Ref.</span>
+      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col lg:flex-row gap-5 items-start lg:items-center justify-between">
+        <div className="flex flex-row flex-wrap sm:flex-nowrap gap-4 items-end w-full lg:w-auto">
+          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Mês de Ref.</span>
             <select 
               value={selectedMes} 
               onChange={(e) => {
                 const val = e.target.value;
                 setSelectedMes(val === 'todos' ? 'todos' : Number(val));
               }}
-              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer min-w-[150px]"
+              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer w-full"
             >
               <option value="todos">Todos os Meses</option>
               <option value="1">Janeiro</option>
@@ -221,20 +226,35 @@ export default function Dashboard() {
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest text-[10px]">Ano Fiscal</span>
+          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[110px]">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Ano Fiscal</span>
             <select 
               value={selectedAno} 
               onChange={(e) => {
                 const val = e.target.value;
                 setSelectedAno(val === 'todos' ? 'todos' : Number(val));
               }}
-              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer min-w-[120px]"
+              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer w-full"
             >
               <option value="todos">Todos os Anos</option>
               <option value="2024">2024</option>
               <option value="2025">2025</option>
               <option value="2026">2026</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Regime</span>
+            <select 
+              value={selectedRegime} 
+              onChange={(e) => {
+                setSelectedRegime(e.target.value as any);
+              }}
+              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer w-full"
+            >
+              <option value="todos">Geral (Todos)</option>
+              <option value="capitalizado">Capitalizado</option>
+              <option value="financeiro">Financeiro</option>
             </select>
           </div>
         </div>
@@ -305,7 +325,7 @@ export default function Dashboard() {
                   contentStyle={{ borderRadius: '14px', border: '1px solid #f1f2f4', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}
                   formatter={(v: any) => [formatBRLValue(v), "Valor Pago Benefícios"]}
                  />
-                <Bar dataKey="valor" fill="#141414" radius={[6, 6, 0, 0]} barSize={42} />
+                <Bar dataKey="valor" fill="#2563EB" radius={[6, 6, 0, 0]} barSize={42} />
               </BarChart>
             </ResponsiveContainer>
           </div>

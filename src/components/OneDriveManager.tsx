@@ -725,7 +725,7 @@ export default function OneDriveManager() {
                           <button 
                             onClick={handleConfirmLinkage}
                             disabled={linkingInProgress}
-                            className="w-full py-4 mt-4 bg-black text-white hover:bg-gray-800 rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-2 disabled:opacity-50"
+                            className="w-full py-4 mt-4 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-xl shadow-blue-500/15 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                           >
                             {linkingInProgress ? (
                               <>

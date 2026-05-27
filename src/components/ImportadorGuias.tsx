@@ -32,6 +32,7 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
   const [selectedDeptId, setSelectedDeptId] = useState(departamentoId || '');
   const [competenciaMes, setCompetenciaMes] = useState(new Date().getMonth() + 1);
   const [competenciaAno, setCompetenciaAno] = useState(new Date().getFullYear());
+  const [selectedRegime, setSelectedRegime] = useState<'capitalizado' | 'financeiro'>('capitalizado');
   const [departamentos, setDepartamentos] = useState<{id: string, nome: string}[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   
@@ -180,6 +181,7 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
             tipo: data.tipo,
             identificacaoGrcp: data.identificacaoGrcp,
             urlGuia: url,
+            regime: selectedRegime,
             updatedAt: serverTimestamp()
           };
 
@@ -219,6 +221,7 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
               nome: currentFile.file.name.split('.')[0],
               urlComprovante: url,
               status: 'pago',
+              regime: selectedRegime,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
@@ -300,6 +303,34 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
                 <option key={d.id} value={d.id}>{d.nome}</option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Regime de Segregação</label>
+            <div className="flex gap-2 bg-gray-50 p-1 rounded-2xl border-2 border-gray-100">
+              <button
+                type="button"
+                onClick={() => setSelectedRegime('capitalizado')}
+                className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                  selectedRegime === 'capitalizado'
+                    ? 'bg-yellow-400 text-gray-900 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Capitalizado
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedRegime('financeiro')}
+                className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                  selectedRegime === 'financeiro'
+                    ? 'bg-yellow-400 text-gray-900 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Financeiro
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -467,13 +498,13 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
                   <div className="grid grid-cols-2 gap-2">
                      <button 
                        onClick={() => setEditForm(prev => ({ ...prev, tipo: 'patronal' }))}
-                       className={`py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 transition-all ${editForm.tipo === 'patronal' ? 'bg-black text-white border-black shadow-lg shadow-black/20' : 'border-gray-100 text-gray-400 hover:border-gray-300'}`}
+                       className={`py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 transition-all ${editForm.tipo === 'patronal' ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20' : 'border-gray-100 text-gray-400 hover:border-gray-300'}`}
                      >
                        Patronal
                      </button>
                      <button 
                        onClick={() => setEditForm(prev => ({ ...prev, tipo: 'segurado' }))}
-                       className={`py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 transition-all ${editForm.tipo === 'segurado' ? 'bg-black text-white border-black shadow-lg shadow-black/20' : 'border-gray-100 text-gray-400 hover:border-gray-300'}`}
+                       className={`py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 transition-all ${editForm.tipo === 'segurado' ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20' : 'border-gray-100 text-gray-400 hover:border-gray-300'}`}
                      >
                        Segurado
                      </button>

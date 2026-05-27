@@ -34,6 +34,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeScreen, setActiveScreen] = useState<Screen>('dashboard');
   const [selectedSec, setSelectedSec] = useState<string | undefined>();
+  const [selectedSecForDepts, setSelectedSecForDepts] = useState<string | undefined>();
   const [selectedDept, setSelectedDept] = useState<string | undefined>();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
@@ -82,14 +83,15 @@ export default function App() {
 
   const resetSelection = () => {
     setSelectedSec(undefined);
+    setSelectedSecForDepts(undefined);
     setSelectedDept(undefined);
   };
 
   if (loading) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#f5f5f5] gap-4">
-        <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-sm font-bold text-gray-400 tracking-[0.2em]">GESTAOPREV</p>
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#f8fafc] gap-4">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm font-bold text-blue-600 tracking-[0.2em]">GESTAOPREV</p>
       </div>
     );
   }
@@ -97,10 +99,10 @@ export default function App() {
   if (!user) {
     return (
       <div className="h-screen w-full flex bg-white overflow-hidden">
-        <div className="hidden lg:flex w-1/2 p-20 flex-col justify-between bg-[#141414] text-white">
+        <div className="hidden lg:flex w-1/2 p-20 flex-col justify-between bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#1E1B4B] text-white">
           <div className="flex items-center gap-3">
-             <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
-                <ShieldCheck className="text-black w-5 h-5" />
+             <div className="w-8 h-8 bg-white rounded flex items-center justify-center shadow-lg shadow-black/15">
+                <ShieldCheck className="text-blue-600 w-5 h-5" />
              </div>
              <span className="font-bold tracking-widest text-lg">GestiPrev</span>
           </div>
@@ -142,14 +144,14 @@ export default function App() {
             initial={{ x: -280 }}
             animate={{ x: 0 }}
             exit={{ x: -280 }}
-            className="w-[280px] bg-[#141414] text-white h-full flex flex-col z-40 fixed lg:relative"
+            className="w-[280px] bg-[#0F172A] text-white h-full flex flex-col z-40 fixed lg:relative border-r border-slate-800 shadow-xl"
           >
             <div className="p-8 pb-12 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
-                  <ShieldCheck className="text-black w-5 h-5" />
+                <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center shadow-md shadow-blue-500/20">
+                  <ShieldCheck className="text-white w-5 h-5" />
                 </div>
-                <span className="font-bold tracking-widest uppercase text-xs">GestiPrev</span>
+                <span className="font-bold tracking-widest uppercase text-xs text-white">GestiPrev</span>
               </div>
               <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
                 <X className="w-5 h-5" />
@@ -199,8 +201,8 @@ export default function App() {
             </nav>
 
             <div className="p-4 mt-auto">
-              <div className="bg-[#1f1f1f] rounded-2xl p-4 flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-xl bg-gray-700 overflow-hidden">
+              <div className="bg-slate-800/60 rounded-2xl p-4 flex items-center gap-3 border border-slate-800/50">
+                 <div className="w-10 h-10 rounded-xl bg-slate-700 overflow-hidden">
                     <img src={user.photoURL} alt="" />
                  </div>
                  <div className="flex-1 overflow-hidden">
@@ -217,23 +219,29 @@ export default function App() {
       </AnimatePresence>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center px-8 justify-between sticky top-0 z-30">
-          <div className="flex items-center gap-4">
+        <header className="h-20 md:h-24 bg-white/90 backdrop-blur-md border-b border-gray-100 flex items-center px-4 md:px-8 justify-between sticky top-0 z-30 transition-all">
+          <div className="flex items-center gap-3 md:gap-5 flex-1 min-w-0">
              {!isSidebarOpen && (
-               <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-gray-100 rounded-lg">
+               <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-gray-100 rounded-lg shrink-0">
                  <Menu className="w-5 h-5" />
                </button>
              )}
-             <div className="flex items-center gap-2 text-sm text-gray-400">
-               <span onClick={() => { setActiveScreen('dashboard'); resetSelection(); }} className="hover:text-black cursor-pointer">Início</span>
+             <div className="flex flex-col min-w-0">
+               <span className="text-[9px] md:text-xs font-bold text-blue-600 uppercase tracking-wider md:tracking-widest truncate leading-tight">
+                 IPME - Instituto de Previdência dos Servidores Públicos Municipais de Eusébio
+               </span>
+               <h2 className="text-xs sm:text-sm md:text-base font-black text-gray-900 tracking-tight leading-normal uppercase truncate mt-0.5 md:mt-1">
+                 Controle de Pagamentos - GRCP
+               </h2>
+             </div>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+             <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400 font-semibold">
+               <span onClick={() => { setActiveScreen('dashboard'); resetSelection(); }} className="hover:text-black cursor-pointer transition-colors">Início</span>
                <span>/</span>
                <span className="text-black font-semibold capitalize">{activeScreen}</span>
              </div>
-          </div>
-          <div className="flex items-center gap-4">
-             <div className="hidden sm:flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-xl text-xs font-bold text-gray-500 border border-transparent hover:border-gray-200 transition-all cursor-pointer">
-               <Search className="w-4 h-4" /> Buscar...
-             </div>
+             <div className="w-px h-6 bg-gray-200 hidden sm:block" />
              <div className="w-10 h-10 rounded-full border border-gray-200 flex items-center justify-center p-1 cursor-pointer hover:bg-gray-50">
                 <UserIcon className="w-5 h-5 text-gray-400" />
              </div>
@@ -253,14 +261,32 @@ export default function App() {
               </motion.div>
             )}
             
-            {activeScreen === 'secretarias' && !selectedSec && (
+            {activeScreen === 'secretarias' && !selectedSec && !selectedSecForDepts && (
               <motion.div 
                  key="secretaria-list"
                  initial={{ opacity: 0, x: 20 }}
                  animate={{ opacity: 1, x: 0 }}
                  exit={{ opacity: 0, x: -20 }}
               >
-                <SecretariaList onSelect={(id) => setSelectedSec(id)} />
+                <SecretariaList 
+                  onSelect={(id) => setSelectedSec(id)} 
+                  onSelectDepartments={(id) => setSelectedSecForDepts(id)}
+                />
+              </motion.div>
+            )}
+
+            {activeScreen === 'secretarias' && selectedSecForDepts && !selectedDept && (
+              <motion.div 
+                 key="departamentos"
+                 initial={{ opacity: 0, scale: 0.98 }}
+                 animate={{ opacity: 1, scale: 1 }}
+                 exit={{ opacity: 0, scale: 1.02 }}
+              >
+                <DepartamentoList 
+                  secretariaId={selectedSecForDepts} 
+                  onBack={() => setSelectedSecForDepts(undefined)} 
+                  onSelectDepartamento={(id) => setSelectedDept(id)}
+                />
               </motion.div>
             )}
 
@@ -370,10 +396,10 @@ function NavItem({ active, icon, label, onClick }: { active: boolean, icon: Reac
   return (
     <button 
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium transition-all ${
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all ${
         active 
-          ? 'bg-white text-black shadow-lg shadow-white/5' 
-          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+          : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
       }`}
     >
       {icon}
@@ -381,7 +407,7 @@ function NavItem({ active, icon, label, onClick }: { active: boolean, icon: Reac
       {active && (
         <motion.div 
           layoutId="activePill"
-          className="ml-auto w-1.5 h-1.5 rounded-full bg-black lg:hidden" 
+          className="ml-auto w-1.5 h-1.5 rounded-full bg-white lg:hidden" 
         />
       )}
     </button>
