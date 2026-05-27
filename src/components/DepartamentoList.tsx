@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Departamento, Secretaria, Guia } from '../types';
-import { Building, Plus, ChevronRight, ArrowLeft, Search, Layers, Pencil, Trash2, Receipt, CheckCircle, Calculator } from 'lucide-react';
+import { Building, Plus, ChevronRight, ArrowLeft, Search, Layers, Pencil, Trash2, Receipt, CheckCircle, Calculator, Cloud, Link as LinkIcon, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import ModalConfirmacao from './ModalConfirmacao';
+import OneDriveExplorer from './OneDriveExplorer';
+import { onedriveService } from '../services/onedriveService';
 
 interface DepartamentoListProps {
   secretariaId: string;
@@ -22,6 +24,12 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
   const [showPayModal, setShowPayModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Departamento | null>(null);
   const [newDeptName, setNewDeptName] = useState('');
+  const [showOneDriveLinker, setShowOneDriveLinker] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    onedriveService.getUser().then(u => setIsConnected(!!u));
+  }, []);
 
   // Modal Control
   const [modalConfig, setModalConfig] = useState<{
@@ -173,8 +181,12 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     if (!editingDept || !editingDept.nome) return;
     try {
       const deptRef = doc(db, 'departamentos', editingDept.id);
-      await updateDoc(deptRef, { nome: editingDept.nome });
+      await updateDoc(deptRef, { 
+        nome: editingDept.nome,
+        onedriveFolderId: editingDept.onedriveFolderId || null
+      });
       setEditingDept(null);
+      setShowOneDriveLinker(false);
       fetchDepartamentos();
     } catch (error) {
       console.error(error);
@@ -350,7 +362,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                 <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col justify-center">
                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Consolidado</p>
                    <div className="text-4xl font-black text-gray-900 mb-2">
-                     R$ {totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                     R$ {totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                    </div>
                    <p className="text-xs text-gray-500">
                      Soma de <span className="font-bold text-emerald-600">{guiasParaPagar.length} guias</span> pendentes em todos os departamentos desta secretaria.
@@ -371,7 +383,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                       {guiasParaPagar.map(g => (
                         <tr key={g.id}>
                           <td className="px-4 py-2 text-gray-600">{departamentos.find(d => d.id === g.departamentoId)?.nome}</td>
-                          <td className="px-4 py-2 text-right font-medium">R$ {g.valor.toLocaleString()}</td>
+                          <td className="px-4 py-2 text-right font-medium">R$ {g.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -401,10 +413,10 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
 
       {/* Modal Editar Departamento */}
       {editingDept && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 text-left">
-          <div className="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 text-left p-4">
+          <div className="bg-white p-8 rounded-3xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-6">Configuração do Dept.</h2>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Nome Oficial</label>
                 <input 
@@ -414,10 +426,64 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                   className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-black outline-none font-medium"
                 />
               </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Vínculo OneDrive</label>
+                {editingDept.onedriveFolderId ? (
+                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Cloud className="text-emerald-600" size={20} />
+                      <div>
+                        <p className="text-xs font-bold text-emerald-900">Pasta Vinclulada</p>
+                        <p className="text-[10px] text-emerald-600 truncate max-w-[200px]">ID: {editingDept.onedriveFolderId}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setEditingDept({...editingDept, onedriveFolderId: undefined})}
+                      className="text-[10px] font-bold text-rose-600 hover:bg-rose-100 px-2 py-1 rounded transition-colors"
+                    >
+                      DESVINCULAR
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {!showOneDriveLinker ? (
+                      <button 
+                        onClick={() => {
+                          if (!isConnected) {
+                            showAlert("Atenção", "Conecte sua conta OneDrive no Dashboard primeiro.", "warning");
+                          } else {
+                            setShowOneDriveLinker(true);
+                          }
+                        }}
+                        className="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:text-black hover:border-gray-900 transition-all flex flex-col items-center justify-center gap-2"
+                      >
+                        <LinkIcon size={24} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Vincular Pasta do OneDrive</span>
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <OneDriveExplorer 
+                          onSelectFolder={(folder) => {
+                            setEditingDept({...editingDept, onedriveFolderId: folder.id});
+                            setShowOneDriveLinker(false);
+                          }}
+                        />
+                        <button 
+                          onClick={() => setShowOneDriveLinker(false)}
+                          className="w-full text-center py-2 text-[10px] font-bold text-gray-400 hover:text-black"
+                        >
+                          CANCELAR SELEÇÃO
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-8 flex gap-3">
               <button 
-                onClick={() => setEditingDept(null)}
+                onClick={() => { setEditingDept(null); setShowOneDriveLinker(false); }}
                 className="flex-1 py-3 text-gray-400 font-bold hover:text-gray-900 uppercase tracking-widest text-[10px]"
               >
                 CANCELAR
@@ -426,7 +492,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                 onClick={handleUpdate}
                 className="flex-1 py-3 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors font-bold text-sm"
               >
-                SALVAR
+                SALVAR ALTERAÇÕES
               </button>
             </div>
           </div>

@@ -11,6 +11,7 @@ export interface Departamento {
   id: string;
   secretariaId: string;
   nome: string;
+  onedriveFolderId?: string;
   createdAt: any;
 }
 

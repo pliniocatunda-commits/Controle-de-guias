@@ -1,18 +1,57 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, storage } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { uploadFile } from '../lib/storage';
 import { Departamento, Guia, Secretaria } from '../types';
 import { 
   FileText, CheckCircle, Clock, Search, 
   ArrowLeft, Download, Eye, Calendar,
   Table as TableIcon, Filter, LayoutGrid, FileSearch,
-  Plus, UploadCloud, X, Minus, RotateCcw
+  Plus, UploadCloud, X, Minus, RotateCcw, Cloud, Folder, File, Link as LinkIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import ModalConfirmacao from './ModalConfirmacao';
+import { onedriveService, DriveItem } from '../services/onedriveService';
+import OneDriveExplorer from './OneDriveExplorer';
+
+// Helper functions for BRL currency formatting and parsing
+const parseBRLToFloat = (value: string | number | undefined | null): number => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return value;
+  const clean = value.replace(/\./g, "").replace(",", ".");
+  return parseFloat(clean) || 0;
+};
+
+const normalizeValue = (val: number | undefined | null): number => {
+  if (val === undefined || val === null) return 0;
+  if (val > 0 && val < 120) {
+    return val * 1000;
+  }
+  return val;
+};
+
+const normalizeGuia = (g: any): Guia => {
+  return {
+    ...g,
+    valor: normalizeValue(g.valor),
+    valorPago: g.valorPago !== undefined ? normalizeValue(g.valorPago) : undefined
+  };
+};
+
+const formatBRL = (value: number | string | undefined | null): string => {
+  if (value === undefined || value === null) return '0,00';
+  let numValue = typeof value === 'string' ? parseBRLToFloat(value) : value;
+  numValue = normalizeValue(numValue);
+  return numValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const handleBRLChange = (valStr: string): string => {
+  const cleanValue = valStr.replace(/\D/g, "");
+  const num = cleanValue ? parseFloat(cleanValue) / 100 : 0;
+  return formatBRL(num);
+};
 
 interface ConsolidatedTableProps {
   secretariaId: string;
@@ -26,9 +65,31 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
   const [loading, setLoading] = useState(true);
   const [mes, setMes] = useState(new Date().getMonth() + 1);
   const [ano, setAno] = useState(new Date().getFullYear());
+  const [tempValues, setTempValues] = useState<Record<string, string>>({});
   
+  // OneDrive connection and selection states
+  const [onedriveConnected, setOnedriveConnected] = useState<boolean>(false);
+  const [onedriveUser, setOnedriveUser] = useState<any>(null);
+  const [linkContext, setLinkContext] = useState<{
+    deptId: string;
+    deptNome: string;
+    tipo: 'patronal' | 'segurado';
+    target: 'guia' | 'comprovante';
+  } | null>(null);
+
+  // OneDrive file mapping form state
+  const [selectedOdFile, setSelectedOdFile] = useState<DriveItem | null>(null);
+  const [odFormValor, setOdFormValor] = useState<string>('');
+  const [odFormGrcp, setOdFormGrcp] = useState<string>('');
+  const [linkingOdInProgress, setLinkingOdInProgress] = useState<boolean>(false);
+  const [linkMode, setLinkMode] = useState<'onedrive' | 'local'>('onedrive');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadContext, setUploadContext] = useState<{deptId: string, tipo: 'patronal' | 'segurado', target: 'guia' | 'comprovante'} | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadForm, setUploadForm] = useState({ valor: 0, identificacaoGrcp: '' });
+  const [modalValorStr, setModalValorStr] = useState('');
+  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
 
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -67,6 +128,98 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
     });
   };
 
+  const checkOneDriveStatus = async () => {
+    try {
+      const u = await onedriveService.getUser();
+      setOnedriveConnected(!!u);
+      setOnedriveUser(u);
+    } catch {
+      setOnedriveConnected(false);
+    }
+  };
+
+  const handleConnectOneDriveInRelatorio = async () => {
+    try {
+      const url = await onedriveService.getAuthUrl();
+      const width = 600, height = 700;
+      const left = window.innerWidth / 2 - width / 2;
+      const top = window.innerHeight / 2 - height / 2;
+      
+      const popup = window.open(url, 'onedrive_auth', `width=${width},height=${height},left=${left},top=${top}`);
+
+      const handleAuthMessage = async (event: MessageEvent) => {
+        if (event.data?.type === 'ONEDRIVE_AUTH_SUCCESS') {
+          const { token, refreshToken } = event.data;
+          if (token) localStorage.setItem('onedrive_token', token);
+          if (refreshToken) localStorage.setItem('onedrive_refresh_token', refreshToken);
+          
+          await checkOneDriveStatus();
+          showAlert("Conectado!", "OneDrive integrado com sucesso nesta sessão.", "success");
+          window.removeEventListener('message', handleAuthMessage);
+        }
+      };
+
+      window.addEventListener('message', handleAuthMessage);
+    } catch (err: any) {
+      showAlert("Erro", err.message || "Erro para abrir canal de autenticação do OneDrive.", "danger");
+    }
+  };
+
+  const handleConfirmOneDriveLink = async () => {
+    if (!selectedOdFile || !linkContext) return;
+    setLinkingOdInProgress(true);
+    try {
+      const { deptId, tipo, target } = linkContext;
+      let guia = guias.find(g => g.departamentoId === deptId && g.tipo === tipo);
+      const urlFieldName = target === 'guia' ? 'urlGuia' : 'urlComprovante';
+      const valorNum = parseBRLToFloat(odFormValor);
+
+      const payload: any = {
+        [urlFieldName]: selectedOdFile.webUrl,
+        identificacaoGrcp: odFormGrcp || `ONEDRIVE-${Date.now().toString().slice(-6)}`,
+        updatedAt: serverTimestamp()
+      };
+
+      if (target === 'guia') {
+        if (valorNum > 0) payload.valor = valorNum;
+      } else {
+        // target is comprovante
+        payload.status = 'pago';
+        if (valorNum > 0) payload.valorPago = valorNum;
+      }
+
+      if (guia) {
+        await updateDoc(doc(db, 'guias', guia.id), payload);
+      } else {
+        const newDoc = {
+          departamentoId: deptId,
+          tipo: tipo,
+          mes: mes,
+          ano: ano,
+          nome: selectedOdFile.name.split('.')[0],
+          valor: target === 'guia' ? valorNum : 0,
+          valorPago: target === 'comprovante' ? valorNum : 0,
+          status: target === 'comprovante' ? 'pago' : 'pendente',
+          identificacaoGrcp: odFormGrcp || `GRCP-OD-${Date.now()}`,
+          vencimento: new Date(ano, mes, 0).toISOString().split('T')[0],
+          [urlFieldName]: selectedOdFile.webUrl,
+          createdAt: serverTimestamp()
+        };
+        await addDoc(collection(db, 'guias'), newDoc);
+      }
+      
+      showAlert("Sucesso", "Arquivo do OneDrive vinculado com sucesso!", "success");
+      await fetchData(); // Reload grid!
+      setLinkContext(null); // Close modal!
+      setSelectedOdFile(null);
+    } catch (err: any) {
+      console.error(err);
+      showAlert("Erro", "Falha ao registrar vínculo do OneDrive.", "danger");
+    } finally {
+      setLinkingOdInProgress(false);
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -83,7 +236,7 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
         where('mes', '==', mes),
         where('ano', '==', ano)
       ));
-      setGuias(guiasSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guia)));
+      setGuias(guiasSnap.docs.map(doc => normalizeGuia({ id: doc.id, ...doc.data() })));
     } catch (error) {
       console.error(error);
     } finally {
@@ -93,12 +246,13 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
 
   useEffect(() => {
     fetchData();
+    checkOneDriveStatus();
   }, [secretariaId, mes, ano]);
 
   const handleInlineUpdate = async (guiaId: string, field: string, value: any) => {
     try {
       await updateDoc(doc(db, 'guias', guiaId), { [field]: value });
-      setGuias(prev => prev.map(g => g.id === guiaId ? { ...g, [field]: value } : g));
+      setGuias(prev => prev.map(g => g.id === guiaId ? normalizeGuia({ ...g, [field]: value }) : g));
     } catch (error) {
       console.error(error);
     }
@@ -109,61 +263,89 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
     fileInputRef.current?.click();
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadContext) return;
+
+    // Em vez de subir direto, abre o modal de preenchimento
+    const existingGuia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
+    const initialVal = uploadContext.target === 'guia' ? (existingGuia?.valor || 0) : (existingGuia?.valorPago || existingGuia?.valor || 0);
+    setPendingFile(file);
+    setUploadForm({
+      valor: initialVal,
+      identificacaoGrcp: existingGuia?.identificacaoGrcp || ''
+    });
+    setModalValorStr(formatBRL(initialVal));
+    setIsFormModalOpen(true);
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!pendingFile || !uploadContext) return;
+    setIsFormModalOpen(false);
 
     try {
       setLoading(true);
       
       // Upload para Firebase Storage
-      const storagePath = `guias/${secretariaId}/${uploadContext.deptId}/${ano}/${mes}/${uploadContext.tipo}_${uploadContext.target}_${Date.now()}.pdf`;
-      const storageRef = ref(storage, storagePath);
-      
-      const uploadResult = await uploadBytes(storageRef, file);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      const downloadUrl = await uploadFile(pendingFile, 'guias');
 
       let guia = guias.find(g => g.departamentoId === uploadContext.deptId && g.tipo === uploadContext.tipo);
       const urlFieldName = uploadContext.target === 'guia' ? 'urlGuia' : 'urlComprovante';
       
       const payload: any = {
         [urlFieldName]: downloadUrl,
+        identificacaoGrcp: uploadForm.identificacaoGrcp,
         updatedAt: serverTimestamp()
       };
 
-      if (uploadContext.target === 'comprovante') {
-         payload.status = 'pago';
-         if (guia && !guia.valorPago) payload.valorPago = guia.valor;
+      if (uploadContext.target === 'guia') {
+        payload.valor = uploadForm.valor;
+      } else {
+        payload.status = 'pago';
+        payload.valorPago = uploadForm.valor;
       }
 
       if (guia) {
         await updateDoc(doc(db, 'guias', guia.id), payload);
-        setGuias(prev => prev.map(g => g.id === guia!.id ? { ...g, ...payload } : g));
+        setGuias(prev => prev.map(g => g.id === guia!.id ? normalizeGuia({ ...g, ...payload }) : g));
       } else {
         const newDoc = {
           departamentoId: uploadContext.deptId,
           tipo: uploadContext.tipo,
           mes: mes,
           ano: ano,
-          nome: file.name.split('.')[0],
-          valor: 0,
-          valorPago: 0,
+          nome: pendingFile.name.split('.')[0],
+          valor: uploadContext.target === 'guia' ? uploadForm.valor : 0,
+          valorPago: uploadContext.target === 'comprovante' ? uploadForm.valor : 0,
           status: uploadContext.target === 'comprovante' ? 'pago' : 'pendente',
-          identificacaoGrcp: `PENDENTE-${Date.now()}`,
+          identificacaoGrcp: uploadForm.identificacaoGrcp || `GRCP-${Date.now()}`,
           vencimento: new Date(ano, mes, 0).toISOString().split('T')[0],
           ...payload,
           createdAt: serverTimestamp()
         };
         const docRef = await addDoc(collection(db, 'guias'), newDoc);
-        setGuias(prev => [...prev, { id: docRef.id, ...newDoc } as Guia]);
+        setGuias(prev => [...prev, normalizeGuia({ id: docRef.id, ...newDoc })]);
       }
       showAlert("Sucesso", "Documento enviado e salvo com sucesso!", "success");
-    } catch (error) {
-      console.error(error);
-      showAlert("Erro", "Falha ao enviar arquivo para o armazenamento.", "danger");
+    } catch (error: any) {
+      console.error("Erro no upload:", error);
+      let msg = "Falha ao enviar arquivo para o armazenamento.";
+      
+      // Diagnóstico detalhado para o usuário
+      if (error.message?.includes('Firebase') || error.code?.includes('storage')) {
+        msg = `Erro no Armazenamento: ${error.message}.`;
+      } else if (error.code === 'storage/unauthorized' || error.message?.includes('CORS')) {
+        msg = "Erro de Permissão ou CORS. Verifique as configurações do Storage no console.";
+      }
+      
+      // Pequeno delay para evitar conflito de canal de mensagem no ambiente AI Studio
+      setTimeout(() => {
+        showAlert("Erro", msg, "danger");
+      }, 100);
     } finally {
       setLoading(false);
       setUploadContext(null);
+      setPendingFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -194,8 +376,34 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
       showAlert("Documento não encontrado", "Este registro não possui um arquivo PDF anexo para visualização.", "info");
       return;
     }
+    
+    // Preparar URL para visualização
+    const sanitizedUrl = url;
+    console.log("[Visualização] Abrindo URL:", sanitizedUrl);
 
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Tentar abrir em nova aba
+    const win = window.open(sanitizedUrl, '_blank');
+    if (!win) {
+      const link = document.createElement('a');
+      link.href = sanitizedUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const downloadDocument = (url: string | undefined, filename: string) => {
+    if (!url) return;
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showAlert("Download", "Iniciando download...", "success");
   };
 
   return (
@@ -251,20 +459,20 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-50 text-[10px] font-black text-gray-600 uppercase tracking-[0.2em] text-center border-b border-gray-200">
-                <th className="py-5 px-6 text-left border-r border-gray-200 w-48">DEPTO</th>
+                <th className="py-5 px-6 text-left border-r border-gray-200 w-[240px]">DEPTO</th>
                 <th colSpan={4} className="py-5 border-r border-gray-200 text-blue-700 bg-blue-50/30">PATRONAL</th>
                 <th colSpan={4} className="py-5 text-emerald-700 bg-emerald-50/30">SEGURADOS</th>
               </tr>
               <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest text-left border-b border-gray-200">
-                <th className="py-3 px-6 border-r border-gray-200">IDENTIFICAÇÃO</th>
+                <th className="py-3 px-6 border-r border-gray-200 w-[240px]">DEPARTAMENTO</th>
                 
-                <th className="py-3 px-4 whitespace-nowrap">ID GRCP</th>
-                <th className="py-3 px-4">VALOR</th>
+                <th className="py-3 px-4 whitespace-nowrap min-w-[140px]">ID GRCP</th>
+                <th className="py-3 px-4 min-w-[100px]">VALOR</th>
                 <th className="py-3 px-4 text-center">GUIA</th>
                 <th className="py-3 px-4 text-center border-r border-gray-200">COMPROVANTE</th>
 
-                <th className="py-3 px-4 whitespace-nowrap">ID GRCP</th>
-                <th className="py-3 px-4">VALOR</th>
+                <th className="py-3 px-4 whitespace-nowrap min-w-[140px]">ID GRCP</th>
+                <th className="py-3 px-4 min-w-[100px]">VALOR</th>
                 <th className="py-3 px-4 text-center">GUIA</th>
                 <th className="py-3 px-4 text-center">COMPROVANTE</th>
               </tr>
@@ -278,32 +486,46 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
 
                 return (
                   <tr key={dept.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="py-3 px-6 border-r border-gray-200">
-                      <p className="font-black text-gray-900 text-[10px] tracking-tight truncate w-40">{dept.nome}</p>
+                    <td className="py-3 px-6 border-r border-gray-200 max-w-[240px]">
+                      <p className="font-black text-gray-900 text-[10px] tracking-tight leading-normal whitespace-normal break-words">{dept.nome}</p>
                     </td>
 
                     {/* PATRONAL SECTION */}
-                    <td className="p-2 px-4">
+                    <td className="p-2 px-4 min-w-[140px]">
                         <div className="min-h-[1.5rem] flex items-center">
                           {patData ? (
-                            <textarea 
-                              className="bg-transparent border-none p-0 text-[9px] font-bold text-gray-600 w-full focus:ring-0 resize-none h-auto overflow-hidden leading-tight"
-                              rows={1}
+                            <input 
+                              type="text"
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
                               value={patData.identificacaoGrcp || ''}
                               onChange={(e) => handleInlineUpdate(patData.id, 'identificacaoGrcp', e.target.value)}
                             />
                           ) : <span className="text-gray-200 text-[8px]">---</span>}
                         </div>
                     </td>
-                    <td className="p-2 px-4">
+                    <td className="p-2 px-4 min-w-[100px]">
                         {patData ? (
                           <div className="flex items-center gap-0.5">
                             <span className="font-black text-gray-900 text-[10px]">R$</span>
                             <input 
-                              type="number"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-20 focus:ring-0 text-[10px]"
-                              value={patData.valor || 0}
-                              onChange={(e) => handleInlineUpdate(patData.id, 'valor', parseFloat(e.target.value) || 0)}
+                              type="text"
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              value={tempValues[patData.id] !== undefined ? tempValues[patData.id] : formatBRL(patData.valor)}
+                              onFocus={() => {
+                                setTempValues(prev => ({ ...prev, [patData.id]: formatBRL(patData.valor) }));
+                              }}
+                              onChange={(e) => {
+                                const typed = e.target.value;
+                                setTempValues(prev => ({ ...prev, [patData.id]: typed }));
+                                handleInlineUpdate(patData.id, 'valor', parseBRLToFloat(typed));
+                              }}
+                              onBlur={() => {
+                                setTempValues(prev => {
+                                  const next = { ...prev };
+                                  delete next[patData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           </div>
                         ) : <span className="text-gray-200 text-[8px]">---</span>}
@@ -313,17 +535,34 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
                          <div className="flex items-center justify-center gap-1">
                            <button 
                              onClick={() => openDocument(patData.urlGuia)}
-                             className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
+                             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                               patData.urlGuia?.includes('firebasestorage')
+                                 ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                                 : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'
+                             }`}
+                             title={patData.urlGuia?.includes('firebasestorage') ? "Visualizar Guia Local" : "Visualizar Guia no OneDrive"}
                            >
-                             <FileText className="w-4 h-4" />
+                             {patData.urlGuia?.includes('firebasestorage') ? <FileText className="w-4 h-4" /> : <Cloud className="w-4 h-4 text-indigo-500" />}
                            </button>
-                           <button onClick={() => handleDeleteGuia(patData.id)} className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors">
+                           <button 
+                             onClick={() => downloadDocument(patData.urlGuia, `guia-patronal-${dept.nome}.pdf`)}
+                             className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
+                             title="Baixar"
+                           >
+                             <Download className="w-4 h-4" />
+                           </button>
+                           <button onClick={() => handleDeleteGuia(patData.id)} className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors" title="Deletar Lançamento">
                               <Minus className="w-3.5 h-3.5" />
                            </button>
                          </div>
                        ) : (
                          <button 
-                           onClick={() => triggerUpload(dept.id, 'patronal', 'guia')}
+                           onClick={() => setLinkContext({
+                             deptId: dept.id,
+                             deptNome: dept.nome,
+                             tipo: 'patronal',
+                             target: 'guia'
+                           })}
                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
                          >
                            <Plus className="w-3.5 h-3.5" />
@@ -332,45 +571,92 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
                     </td>
                     <td className="p-2 text-center border-r border-gray-200">
                        {patData?.urlComprovante ? (
-                         <div className="flex items-center justify-center">
+                         <div className="flex items-center justify-center gap-1">
                            <button 
-                            onClick={() => openDocument(patData.urlComprovante)}
-                            className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
+                             onClick={() => openDocument(patData.urlComprovante)}
+                             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
+                               patData.urlComprovante?.includes('firebasestorage')
+                                 ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                 : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'
+                             }`}
+                             title={patData.urlComprovante?.includes('firebasestorage') ? "Visualizar Comprovante Local" : "Visualizar Comprovante no OneDrive"}
                            >
-                             <CheckCircle className="w-4.5 h-4.5" />
+                             {patData.urlComprovante?.includes('firebasestorage') ? <CheckCircle className="w-4.5 h-4.5" /> : <Cloud className="w-4 h-4 text-indigo-500" />}
+                           </button>
+                           <button 
+                             onClick={() => {
+                               askConfirmation(
+                                 "Remover Comprovante",
+                                 "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                 "danger",
+                                 async () => {
+                                   try {
+                                     await updateDoc(doc(db, 'guias', patData.id), { urlComprovante: null, status: 'pendente' });
+                                     setGuias(prev => prev.map(g => g.id === patData.id ? { ...g, urlComprovante: null, status: 'pendente' } : g));
+                                     showAlert("Desvinculado", "Arquivo do comprovante de pagamento desassociado.", "success");
+                                   } catch (err) {
+                                     console.error(err);
+                                   }
+                                 }
+                               );
+                             }} 
+                             className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
+                             title="Desvincular Comprovante"
+                           >
+                              <Minus className="w-3.5 h-3.5" />
                            </button>
                          </div>
                        ) : (
-                        <button 
-                          onClick={() => triggerUpload(dept.id, 'patronal', 'comprovante')}
-                          className="w-7 h-7 bg-transparent mx-auto"
-                        >
-                        </button>
+                         <button 
+                           onClick={() => setLinkContext({
+                             deptId: dept.id,
+                             deptNome: dept.nome,
+                             tipo: 'patronal',
+                             target: 'comprovante'
+                           })}
+                           className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                         >
+                           <Plus className="w-3.5 h-3.5" />
+                         </button>
                        )}
                     </td>
 
                     {/* SEGURADOS SECTION */}
-                    <td className="p-2 px-4">
+                    <td className="p-2 px-4 min-w-[140px]">
                         <div className="min-h-[1.5rem] flex items-center">
                           {segData ? (
-                            <textarea 
-                              className="bg-transparent border-none p-0 text-[9px] font-bold text-gray-600 w-full focus:ring-0 resize-none h-auto overflow-hidden leading-tight"
-                              rows={1}
+                            <input 
+                              type="text"
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
                               value={segData.identificacaoGrcp || ''}
                               onChange={(e) => handleInlineUpdate(segData.id, 'identificacaoGrcp', e.target.value)}
                             />
                           ) : <span className="text-gray-200 text-[8px]">---</span>}
                         </div>
                     </td>
-                    <td className="p-2 px-4">
+                    <td className="p-2 px-4 min-w-[100px]">
                         {segData ? (
                           <div className="flex items-center gap-0.5">
                             <span className="font-black text-gray-900 text-[10px]">R$</span>
                             <input 
-                              type="number"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-20 focus:ring-0 text-[10px]"
-                              value={segData.valor || 0}
-                              onChange={(e) => handleInlineUpdate(segData.id, 'valor', parseFloat(e.target.value) || 0)}
+                              type="text"
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              value={tempValues[segData.id] !== undefined ? tempValues[segData.id] : formatBRL(segData.valor)}
+                              onFocus={() => {
+                                setTempValues(prev => ({ ...prev, [segData.id]: formatBRL(segData.valor) }));
+                              }}
+                              onChange={(e) => {
+                                const typed = e.target.value;
+                                setTempValues(prev => ({ ...prev, [segData.id]: typed }));
+                                handleInlineUpdate(segData.id, 'valor', parseBRLToFloat(typed));
+                              }}
+                              onBlur={() => {
+                                setTempValues(prev => {
+                                  const next = { ...prev };
+                                  delete next[segData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           </div>
                         ) : <span className="text-gray-200 text-[8px]">---</span>}
@@ -380,17 +666,34 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
                          <div className="flex items-center justify-center gap-1">
                            <button 
                              onClick={() => openDocument(segData.urlGuia)}
-                             className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
+                             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                               segData.urlGuia?.includes('firebasestorage')
+                                 ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                                 : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'
+                             }`}
+                             title={segData.urlGuia?.includes('firebasestorage') ? "Visualizar Guia Local" : "Visualizar Guia no OneDrive"}
                            >
-                             <FileText className="w-4 h-4" />
+                             {segData.urlGuia?.includes('firebasestorage') ? <FileText className="w-4 h-4" /> : <Cloud className="w-4 h-4 text-indigo-500" />}
                            </button>
-                           <button onClick={() => handleDeleteGuia(segData.id)} className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors">
+                           <button 
+                             onClick={() => downloadDocument(segData.urlGuia, `guia-segurado-${dept.nome}.pdf`)}
+                             className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
+                             title="Baixar"
+                           >
+                             <Download className="w-4 h-4" />
+                           </button>
+                           <button onClick={() => handleDeleteGuia(segData.id)} className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors" title="Deletar Lançamento">
                               <Minus className="w-3.5 h-3.5" />
                            </button>
                          </div>
                        ) : (
                          <button 
-                           onClick={() => triggerUpload(dept.id, 'segurado', 'guia')}
+                           onClick={() => setLinkContext({
+                             deptId: dept.id,
+                             deptNome: dept.nome,
+                             tipo: 'segurado',
+                             target: 'guia'
+                           })}
                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
                          >
                            <Plus className="w-3.5 h-3.5" />
@@ -399,20 +702,53 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
                     </td>
                     <td className="p-2 text-center">
                        {segData?.urlComprovante ? (
-                         <div className="flex items-center justify-center">
+                         <div className="flex items-center justify-center gap-1">
                            <button 
-                            onClick={() => openDocument(segData.urlComprovante)}
-                            className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
+                             onClick={() => openDocument(segData.urlComprovante)}
+                             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
+                               segData.urlComprovante?.includes('firebasestorage')
+                                 ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                 : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'
+                             }`}
+                             title={segData.urlComprovante?.includes('firebasestorage') ? "Visualizar Comprovante Local" : "Visualizar Comprovante no OneDrive"}
                            >
-                             <CheckCircle className="w-4.5 h-4.5" />
+                             {segData.urlComprovante?.includes('firebasestorage') ? <CheckCircle className="w-4.5 h-4.5" /> : <Cloud className="w-4 h-4 text-indigo-500" />}
+                           </button>
+                           <button 
+                             onClick={() => {
+                               askConfirmation(
+                                 "Remover Comprovante",
+                                 "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                 "danger",
+                                 async () => {
+                                   try {
+                                     await updateDoc(doc(db, 'guias', segData.id), { urlComprovante: null, status: 'pendente' });
+                                     setGuias(prev => prev.map(g => g.id === segData.id ? { ...g, urlComprovante: null, status: 'pendente' } : g));
+                                     showAlert("Desvinculado", "Arquivo do comprovante de pagamento desassociado.", "success");
+                                   } catch (err) {
+                                     console.error(err);
+                                   }
+                                 }
+                               );
+                             }} 
+                             className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
+                             title="Desvincular Comprovante"
+                           >
+                              <Minus className="w-3.5 h-3.5" />
                            </button>
                          </div>
                        ) : (
-                        <button 
-                          onClick={() => triggerUpload(dept.id, 'segurado', 'comprovante')}
-                          className="w-7 h-7 bg-transparent mx-auto"
-                        >
-                        </button>
+                         <button 
+                           onClick={() => setLinkContext({
+                             deptId: dept.id,
+                             deptNome: dept.nome,
+                             tipo: 'segurado',
+                             target: 'comprovante'
+                           })}
+                           className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                         >
+                           <Plus className="w-3.5 h-3.5" />
+                         </button>
                        )}
                     </td>
                   </tr>
@@ -462,6 +798,306 @@ export default function RelatorioConsolidado({ secretariaId, onBack }: Consolida
         onConfirm={modalConfig.onConfirm}
         onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
       />
+
+      {/* Modal de Preenchimento antes do Upload */}
+      <AnimatePresence>
+        {isFormModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-10 relative overflow-hidden"
+            >
+              {/* Detalhe Decorativo */}
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 to-emerald-500" />
+              
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h3 className="text-xl font-black italic tracking-tighter text-gray-900 leading-none">CONFERÊNCIA DE DADOS</h3>
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-2">{uploadContext?.target === 'guia' ? 'Anexando Guia' : 'Anexando Comprovante'}</p>
+                </div>
+                <button onClick={() => setIsFormModalOpen(false)} className="text-gray-400 hover:text-black">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Identificação (Código GRCP)</label>
+                  <input 
+                    type="text"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="Ex: GRCP-2026-X"
+                    value={uploadForm.identificacaoGrcp}
+                    onChange={e => setUploadForm(prev => ({ ...prev, identificacaoGrcp: e.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                    {uploadContext?.target === 'guia' ? 'Valor da Guia' : 'Valor Pago (Comprovante)'}
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-gray-400 text-sm">R$</span>
+                    <input 
+                      type="text"
+                      className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-12 pr-4 py-3 font-black text-gray-900 text-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                      value={modalValorStr}
+                      onChange={e => {
+                        setModalValorStr(e.target.value);
+                        setUploadForm(prev => ({ ...prev, valor: parseBRLToFloat(e.target.value) }));
+                      }}
+                      onBlur={() => {
+                        setModalValorStr(formatBRL(parseBRLToFloat(modalValorStr)));
+                      }}
+                    />
+                  </div>
+                </div>
+                
+                <div className="pt-4 flex gap-4">
+                  <button 
+                    onClick={() => setIsFormModalOpen(false)}
+                    className="flex-1 px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest text-gray-500 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={handleConfirmUpload}
+                    disabled={loading}
+                    className="flex-1 bg-black text-white px-6 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-800 transition-all shadow-lg shadow-black/10 disabled:opacity-50"
+                  >
+                    {loading ? 'Subindo...' : 'Confirmar e Enviar'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Unificado de Vínculo: OneDrive e Local */}
+      <AnimatePresence>
+        {linkContext && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: "spring", duration: 0.3 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl p-8 relative overflow-hidden my-8"
+            >
+              {/* Top border colored gradient */}
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-emerald-500" />
+              
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-black italic tracking-tighter text-gray-900 leading-none uppercase">VINCULAR DOCUMENTO</h3>
+                  <p className="text-[10px] font-black text-gray-400 mt-2 uppercase">
+                    {linkContext.deptNome} &bull; <span className="text-indigo-600 font-bold">{linkContext.tipo}</span> &bull; <span className="text-emerald-600 font-bold">{linkContext.target}</span>
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setLinkContext(null);
+                    setSelectedOdFile(null);
+                  }} 
+                  className="p-1 rounded-full text-gray-400 hover:text-black hover:bg-gray-100 transition-all"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Selector Tabs for OneDrive vs Local */}
+              <div className="grid grid-cols-2 gap-2 p-1.5 bg-gray-50 rounded-2xl mb-6">
+                <button
+                  type="button"
+                  onClick={() => setLinkMode('onedrive')}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all ${
+                    linkMode === 'onedrive' 
+                      ? 'bg-white text-indigo-600 shadow-sm border border-gray-100'
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  <Cloud className="w-4 h-4" />
+                  OneDrive Cloud
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkMode('local')}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all ${
+                    linkMode === 'local' 
+                      ? 'bg-white text-blue-600 shadow-sm border border-gray-100'
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  Upload Local
+                </button>
+              </div>
+
+              {linkMode === 'onedrive' ? (
+                <div className="space-y-4">
+                  {onedriveConnected ? (
+                    <div>
+                      <div className="flex justify-between items-center bg-indigo-50/50 rounded-2xl p-4 mb-4 border border-indigo-100/30">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs uppercase">
+                            {onedriveUser?.displayName?.slice(0, 2) || 'OD'}
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-gray-800 tracking-tight leading-none">{onedriveUser?.displayName}</p>
+                            <p className="text-[9px] font-bold text-gray-400 mt-1">{onedriveUser?.mail || onedriveUser?.userPrincipalName}</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full">
+                          CONECTADO
+                        </span>
+                      </div>
+
+                      {selectedOdFile ? (
+                        <div className="space-y-4 bg-gray-50/50 p-6 rounded-3xl border border-gray-100">
+                          <div className="flex items-center gap-4">
+                            <div className="p-3 bg-red-50 text-red-500 rounded-2xl">
+                              <FileText className="w-8 h-8" />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <p className="text-xs font-black text-gray-800 truncate">{selectedOdFile.name}</p>
+                              <p className="text-[9px] font-bold text-gray-400 mt-0.5">Link direto: {selectedOdFile.webUrl?.slice(0, 50)}...</p>
+                            </div>
+                            <button 
+                              type="button"
+                              onClick={() => setSelectedOdFile(null)} 
+                              className="text-[9px] font-black uppercase tracking-widest text-rose-500 hover:underline"
+                            >
+                              Trocar
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Identificação (Código GRCP)</label>
+                              <input 
+                                type="text"
+                                className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                placeholder="Auto-gerado se vazio"
+                                value={odFormGrcp}
+                                onChange={e => setOdFormGrcp(e.target.value)}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                                {linkContext?.target === 'guia' ? 'Valor da Guia' : 'Valor Pago (Comprovante)'}
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-gray-400 text-xs">R$</span>
+                                <input 
+                                  type="text"
+                                  className="w-full bg-white border border-gray-100 rounded-xl pl-10 pr-4 py-3 font-black text-gray-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                  value={odFormValor}
+                                  placeholder="0,00"
+                                  onChange={e => {
+                                    setOdFormValor(e.target.value);
+                                  }}
+                                  onBlur={() => {
+                                    setOdFormValor(formatBRL(parseBRLToFloat(odFormValor)));
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-4 pt-4">
+                            <button 
+                              type="button"
+                              onClick={() => setSelectedOdFile(null)} 
+                              className="flex-1 py-3 text-center border border-gray-100 bg-white rounded-xl text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-gray-50 transition-colors"
+                            >
+                              Voltar
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={handleConfirmOneDriveLink}
+                              disabled={linkingOdInProgress}
+                              className="flex-grow py-3 text-center bg-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest text-white hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                            >
+                              {linkingOdInProgress ? "Vinculando..." : "Salvar Vínculo"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Navegue e escolha o arquivo PDF:</p>
+                          <OneDriveExplorer 
+                            initialFolderId={departamentos.find(d => d.id === linkContext.deptId)?.onedriveFolderId}
+                            onSelectFile={(file) => {
+                              setSelectedOdFile(file);
+                              // Buscar guias existentes
+                              const existingGuia = guias.find(g => g.departamentoId === linkContext.deptId && g.tipo === linkContext.tipo);
+                              setOdFormGrcp(existingGuia?.identificacaoGrcp || '');
+                              const initialVal = linkContext.target === 'guia' ? (existingGuia?.valor || 0) : (existingGuia?.valorPago || existingGuia?.valor || 0);
+                              setOdFormValor(formatBRL(initialVal));
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-10 border border-dashed border-gray-200 rounded-[2rem] text-center bg-gray-50/50">
+                      <Cloud className="w-12 h-12 text-indigo-400 mx-auto mb-4 animate-bounce" />
+                      <h4 className="text-sm font-black text-gray-800 uppercase tracking-tight">OneDrive Não Conectado</h4>
+                      <p className="text-xs text-gray-400 max-w-sm mx-auto mt-2 leading-relaxed">
+                        Conecte sua conta Microsoft OneDrive para navegar nas pastas e realizar vínculos de forma instantânea.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleConnectOneDriveInRelatorio}
+                        className="mt-6 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-md shadow-indigo-600/10"
+                      >
+                        Conectar ao OneDrive
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div 
+                    onClick={() => {
+                      setUploadContext({
+                        deptId: linkContext.deptId,
+                        tipo: linkContext.tipo,
+                        target: linkContext.target
+                      });
+                      setLinkContext(null); // Clean transition logic
+                      setTimeout(() => {
+                        fileInputRef.current?.click();
+                      }, 100);
+                    }}
+                    className="p-12 border-2 border-dashed border-gray-200 rounded-[2rem] hover:border-blue-500 hover:bg-blue-50/20 text-center cursor-pointer transition-all group"
+                  >
+                    <UploadCloud className="w-12 h-12 text-gray-300 group-hover:text-blue-500 mx-auto mb-4 transition-all group-hover:scale-110" />
+                    <h4 className="text-xs font-black text-gray-700 tracking-tight uppercase">Escolher arquivo local</h4>
+                    <p className="text-[10px] text-gray-400 mt-2 max-w-xs mx-auto">
+                      Selecione um arquivo PDF de seu computador para realizar upload direto ao Firebase Storage.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button 
+                      type="button"
+                      onClick={() => setLinkContext(null)}
+                      className="px-6 py-3 border border-gray-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-gray-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

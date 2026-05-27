@@ -9,11 +9,37 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+// Removido import do Cloudinary pois agora usamos Firebase Storage direto
 
 export default function ComprovanteList() {
   const [comprovantes, setComprovantes] = useState<(Comprovante & { guia?: Guia })[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const openDocument = (url: string | undefined) => {
+    if (!url) return;
+    const win = window.open(url, '_blank');
+    if (!win) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const downloadDocument = (url: string | undefined, filename: string) => {
+    if (!url) return;
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || 'documento.pdf';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   useEffect(() => {
     async function fetchData() {
@@ -100,7 +126,7 @@ export default function ComprovanteList() {
                     </div>
                     <div className="flex items-center gap-6">
                       <span className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-                        <DollarSign className="w-4 h-4 text-emerald-500" /> R$ {comp.valorPago.toLocaleString()}
+                        <DollarSign className="w-4 h-4 text-emerald-500" /> R$ {comp.valorPago.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <span className="text-sm font-medium text-gray-400 flex items-center gap-1.5">
                         <Calendar className="w-4 h-4" /> Pago em {format(new Date(comp.dataPagamento), 'dd/MM/yyyy')}
@@ -110,10 +136,18 @@ export default function ComprovanteList() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                   <button className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all shadow-sm bg-white border border-gray-50">
+                   <button 
+                    onClick={(e) => { e.stopPropagation(); openDocument(comp.urlOriginal); }}
+                    className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all shadow-sm bg-white border border-gray-50"
+                    title="Visualizar Comprovante"
+                   >
                      <Eye className="w-5 h-5" />
                    </button>
-                   <button className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all shadow-sm bg-white border border-gray-50">
+                   <button 
+                    onClick={(e) => { e.stopPropagation(); downloadDocument(comp.urlOriginal, `comprovante-${comp.id}.pdf`); }}
+                    className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all shadow-sm bg-white border border-gray-50"
+                    title="Baixar Arquivo"
+                   >
                      <Download className="w-5 h-5" />
                    </button>
                 </div>

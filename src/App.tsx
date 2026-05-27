@@ -9,7 +9,8 @@ import {
   Search,
   Menu,
   X,
-  ShieldCheck
+  ShieldCheck,
+  Cloud
 } from 'lucide-react';
 import { auth, googleProvider, db } from './lib/firebase';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -21,9 +22,11 @@ import DepartamentoList from './components/DepartamentoList';
 import RelatorioConsolidado from './components/RelatorioConsolidado';
 import GuiaList from './components/GuiaList';
 import ComprovanteList from './components/ComprovanteList';
+import OneDriveManager from './components/OneDriveManager';
+import OneDriveConnector from './components/OneDriveConnector';
 import { motion, AnimatePresence } from 'motion/react';
 
-type Screen = 'dashboard' | 'secretarias' | 'guias' | 'comprovantes' | 'config';
+type Screen = 'dashboard' | 'secretarias' | 'guias' | 'comprovantes' | 'config' | 'onedrive';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -178,6 +181,12 @@ export default function App() {
                 icon={<ShieldCheck className="w-5 h-5" />}
                 label="Comprovantes"
               />
+              <NavItem 
+                active={activeScreen === 'onedrive'} 
+                onClick={() => { setActiveScreen('onedrive'); resetSelection(); }}
+                icon={<Cloud className="w-5 h-5" />}
+                label="Arquivos OneDrive"
+              />
               <div className="pt-8 mb-2 px-4 text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">
                 Sistema
               </div>
@@ -284,11 +293,49 @@ export default function App() {
             )}
 
             {activeScreen === 'config' && (
-              <div className="p-8 text-center text-gray-400 mt-20">
-                <Settings className="w-16 h-16 mx-auto mb-4 opacity-10" />
-                <h3 className="text-xl font-bold text-gray-900">Configurações do System</h3>
-                <p>Módulo de administração de cargos e permissões.</p>
-              </div>
+              <motion.div 
+                key="config"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="p-8 max-w-[1240px] mx-auto space-y-8"
+              >
+                <div>
+                  <h1 className="text-3xl font-bold tracking-tight text-gray-900">Configurações</h1>
+                  <p className="text-gray-500 text-sm mt-1">Gerencie integrações e preferências do sistema GestiPrev</p>
+                </div>
+
+                {/* OneDrive Configuration Integration */}
+                <div className="space-y-4">
+                  <h2 className="text-lg font-bold text-gray-900">Conexões & Serviços</h2>
+                  <OneDriveConnector />
+                </div>
+
+                {/* System Settings Status */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                  <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <Settings className="w-4 h-4 text-gray-550" />
+                    Informações do Sistema
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-xs text-gray-600">
+                    <div className="space-y-1">
+                      <span className="font-semibold text-gray-400 block uppercase tracking-wider text-[10px]">Função do Usuário</span>
+                      <span className="font-bold text-gray-950 text-sm uppercase">{profile?.role || 'Buscando...'}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="font-semibold text-gray-400 block uppercase tracking-wider text-[10px]">E-mail Vinculado</span>
+                      <span className="font-bold text-gray-950 text-sm">{profile?.email || 'Buscando...'}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="font-semibold text-gray-400 block uppercase tracking-wider text-[10px]">Ambiente Ativo</span>
+                      <span className="font-bold text-emerald-600 text-sm uppercase flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Ambiente em Nuvem Ativo
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
             )}
 
             {activeScreen === 'comprovantes' && (
@@ -299,6 +346,17 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
               >
                 <ComprovanteList />
+              </motion.div>
+            )}
+
+            {activeScreen === 'onedrive' && (
+              <motion.div 
+                key="onedrive"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+              >
+                <OneDriveManager />
               </motion.div>
             )}
           </AnimatePresence>
