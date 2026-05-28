@@ -67,9 +67,13 @@ export default function App() {
             type: 'ONEDRIVE_AUTH_SUCCESS',
             token: token
           }, '*');
-          window.close();
         } catch (e) {
           console.error("Erro ao notificar janela principal:", e);
+        }
+        try {
+          window.close();
+        } catch (closeErr) {
+          console.error("Erro ao fechar janela:", closeErr);
         }
       } else {
         // Se abriu na mesma aba, redefine para a raiz e recarrega
@@ -83,9 +87,13 @@ export default function App() {
             type: 'ONEDRIVE_AUTH_FAILURE',
             error: errorDesc
           }, '*');
-          window.close();
         } catch (e) {
           console.error("Erro ao notificar falha:", e);
+        }
+        try {
+          window.close();
+        } catch (closeErr) {
+          console.error("Erro ao fechar janela de erro:", closeErr);
         }
       } else {
         alert("Erro na Autenticação com OneDrive: " + errorDesc);
