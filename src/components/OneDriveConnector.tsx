@@ -63,6 +63,11 @@ export default function OneDriveConnector() {
 
   const handleConnect = async () => {
     setError(null);
+    if (window.location.hostname.includes('vercel.app')) {
+      setError("Você está acessando a aplicação via Vercel (controle-de-guias.vercel.app). Como o Vercel hospeda o aplicativo de forma 100% estática (SPA), o servidor Express que executa a troca segura de tokens com a Microsoft não está ativo neste domínio. Por favor, acesse o aplicativo através do link oficial publicado no Cloud Run onde todos os recursos do backend estão funcionando perfeitamente.");
+      setShowHelp(true);
+      return;
+    }
     try {
       const url = await onedriveService.getAuthUrl();
       const width = 600;
@@ -94,8 +99,30 @@ export default function OneDriveConnector() {
     </div>
   );
 
+  const isVercel = window.location.hostname.includes('vercel.app');
+
   return (
     <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm mb-6">
+      {isVercel && (
+        <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2 leading-relaxed">
+          <div className="flex items-center gap-2 font-bold text-amber-950">
+            <AlertCircle size={16} className="text-amber-500 shrink-0" />
+            <span>Servidor Backend Inativo neste Domínio (Vercel)</span>
+          </div>
+          <p>
+            Você está acessando o sistema pelo domínio do Vercel (<code>controle-de-guias.vercel.app</code>). Este projeto possui recursos **Full-Stack** (com rotas de servidor seguras para o login do OneDrive e extração de guias com IA) que exigem o backend ativo no <strong>Google Cloud Run</strong>.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 pt-1 items-start sm:items-center">
+            <span className="font-semibold text-amber-950">Utilize a página publicada oficial:</span>
+            <a 
+              href="https://ais-pre-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app"
+              className="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors inline-flex"
+            >
+              Ir para Página Publicada (Cloud Run) <ExternalLink size={11} />
+            </a>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className={`p-2.5 rounded-xl ${user ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
