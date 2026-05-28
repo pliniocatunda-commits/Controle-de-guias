@@ -38,22 +38,24 @@ export default function App() {
   const [selectedDept, setSelectedDept] = useState<string | undefined>();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
+  const isAuthCallback = window.location.pathname.includes('/auth/callback') || 
+                         window.location.hash.includes('access_token=') || 
+                         window.location.search.includes('access_token=') || 
+                         window.location.search.includes('error=');
+
   useEffect(() => {
     // Detecta retorno de autenticação do OneDrive via hash fragment ou query params (relevante para logins no Vercel)
     const hash = window.location.hash || '';
     const search = window.location.search || '';
     
-    let token = null;
-    let errorDesc = null;
-
-    if (hash.includes('access_token=') || search.includes('access_token=')) {
-      const rawParams = hash.includes('access_token=') 
-        ? hash.substring(hash.indexOf('access_token=')) 
-        : search.substring(search.indexOf('access_token='));
-      const params = new URLSearchParams(rawParams);
-      token = params.get('access_token');
-      errorDesc = params.get('error_description');
-    }
+    // Limpa o '#' do hash se houver para que URLSearchParams possa utilizá-lo corretamente
+    const hashCleaned = hash.startsWith('#') ? hash.substring(1) : hash;
+    const hashParams = new URLSearchParams(hashCleaned);
+    const searchParams = new URLSearchParams(search);
+    
+    const token = hashParams.get('access_token') || searchParams.get('access_token');
+    const errorDesc = hashParams.get('error_description') || searchParams.get('error_description') || 
+                      hashParams.get('error') || searchParams.get('error');
 
     if (token) {
       localStorage.setItem('onedrive_token', token);
@@ -85,6 +87,10 @@ export default function App() {
         } catch (e) {
           console.error("Erro ao notificar falha:", e);
         }
+      } else {
+        alert("Erro na Autenticação com OneDrive: " + errorDesc);
+        window.history.replaceState({}, document.title, '/');
+        window.location.reload();
       }
     }
   }, []);
@@ -137,6 +143,18 @@ export default function App() {
     setSelectedSecForDepts(undefined);
     setSelectedDept(undefined);
   };
+
+  if (isAuthCallback) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#f8fafc] gap-4 p-5 text-center">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm font-bold text-blue-600 tracking-[0.25em] uppercase">Conectando OneDrive</p>
+        <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
+          Autenticando sua conta com o Microsoft Graph de forma segura e direta. Esta janela ou redirecionamento será finalizado e fechado em breve...
+        </p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

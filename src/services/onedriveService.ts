@@ -200,7 +200,7 @@ export const onedriveService = {
       client_id: config.clientId.trim(),
       response_type: "token", // Implicit Grant flow para SPAs estáticos sem necessidade de segredo no backend
       redirect_uri: currentRedirectUri,
-      response_mode: "query",
+      response_mode: "fragment",
       scope: "files.readwrite.all User.Read",
       state: "12345",
     });
