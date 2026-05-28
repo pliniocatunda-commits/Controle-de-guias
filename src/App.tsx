@@ -39,6 +39,57 @@ export default function App() {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
+    // Detecta retorno de autenticação do OneDrive via hash fragment ou query params (relevante para logins no Vercel)
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    
+    let token = null;
+    let errorDesc = null;
+
+    if (hash.includes('access_token=') || search.includes('access_token=')) {
+      const rawParams = hash.includes('access_token=') 
+        ? hash.substring(hash.indexOf('access_token=')) 
+        : search.substring(search.indexOf('access_token='));
+      const params = new URLSearchParams(rawParams);
+      token = params.get('access_token');
+      errorDesc = params.get('error_description');
+    }
+
+    if (token) {
+      localStorage.setItem('onedrive_token', token);
+      
+      // Se tiver abridor (janela popup), envia mensagem para a aba principal e se fecha
+      if (window.opener) {
+        try {
+          window.opener.postMessage({ 
+            type: 'ONEDRIVE_AUTH_SUCCESS',
+            token: token
+          }, '*');
+          window.close();
+        } catch (e) {
+          console.error("Erro ao notificar janela principal:", e);
+        }
+      } else {
+        // Se abriu na mesma aba, redefine para a raiz e recarrega
+        window.history.replaceState({}, document.title, '/');
+        window.location.reload();
+      }
+    } else if (errorDesc) {
+      if (window.opener) {
+        try {
+          window.opener.postMessage({ 
+            type: 'ONEDRIVE_AUTH_FAILURE',
+            error: errorDesc
+          }, '*');
+          window.close();
+        } catch (e) {
+          console.error("Erro ao notificar falha:", e);
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {

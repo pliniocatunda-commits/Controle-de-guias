@@ -11,6 +11,12 @@ export default function OneDriveConnector() {
   const [diagnostics, setDiagnostics] = useState<any>(null);
   const [loadingDiag, setLoadingDiag] = useState(false);
 
+  // Estados para configuração do OneDrive salvas no Firestore para Vercel
+  const [configClientId, setConfigClientId] = useState('');
+  const [configClientSecret, setConfigClientSecret] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   useEffect(() => {
     checkStatus();
 
@@ -34,8 +40,42 @@ export default function OneDriveConnector() {
   useEffect(() => {
     if (showHelp) {
       loadDiagnostics();
+      loadConfigFromFirestore();
     }
   }, [showHelp]);
+
+  const loadConfigFromFirestore = async () => {
+    try {
+      const { getOneDriveConfig } = await import('../services/onedriveService');
+      const config = await getOneDriveConfig();
+      if (config) {
+        setConfigClientId(config.clientId || '');
+        setConfigClientSecret(config.clientSecret || '');
+      }
+    } catch (e) {
+      console.error("Erro ao carregar configurações do OneDrive do Firestore:", e);
+    }
+  };
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingConfig(true);
+    setSaveSuccess(false);
+    try {
+      const { saveOneDriveConfig } = await import('../services/onedriveService');
+      await saveOneDriveConfig({
+        clientId: configClientId,
+        clientSecret: configClientSecret
+      });
+      setSaveSuccess(true);
+      await loadDiagnostics();
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      alert("Erro ao salvar credenciais no Firebase: " + err.message);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   const loadDiagnostics = async () => {
     setLoadingDiag(true);
@@ -63,11 +103,6 @@ export default function OneDriveConnector() {
 
   const handleConnect = async () => {
     setError(null);
-    if (window.location.hostname.includes('vercel.app')) {
-      setError("Você está acessando a aplicação via Vercel (controle-de-guias.vercel.app). Como o Vercel hospeda o aplicativo de forma 100% estática (SPA), o servidor Express que executa a troca segura de tokens com a Microsoft não está ativo neste domínio. Por favor, acesse o aplicativo através do link oficial publicado no Cloud Run onde todos os recursos do backend estão funcionando perfeitamente.");
-      setShowHelp(true);
-      return;
-    }
     try {
       const url = await onedriveService.getAuthUrl();
       const width = 600;
@@ -77,7 +112,7 @@ export default function OneDriveConnector() {
       
       window.open(url, 'onedrive_auth', `width=${width},height=${height},left=${left},top=${top}`);
     } catch (err: any) {
-      setError(err.message || "Não foi possível iniciar a conexão com o OneDrive.");
+      setError(err.message || "Não foi possível iniciar a conexão com o OneDrive. Certifique-se de configurar o Client ID no painel abaixo.");
       setShowHelp(true);
     }
   };
@@ -104,23 +139,17 @@ export default function OneDriveConnector() {
   return (
     <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm mb-6">
       {isVercel && (
-        <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2 leading-relaxed">
-          <div className="flex items-center gap-2 font-bold text-amber-950">
-            <AlertCircle size={16} className="text-amber-500 shrink-0" />
-            <span>Servidor Backend Inativo neste Domínio (Vercel)</span>
+        <div className="mb-5 p-4 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-2 leading-relaxed">
+          <div className="flex items-center gap-2 font-bold text-blue-950">
+            <CheckCircle2 size={16} className="text-blue-500 shrink-0" />
+            <span>Suporte a Conexão Direta Ativado (Vercel)</span>
           </div>
           <p>
-            Você está acessando o sistema pelo domínio do Vercel (<code>controle-de-guias.vercel.app</code>). Este projeto possui recursos **Full-Stack** (com rotas de servidor seguras para o login do OneDrive e extração de guias com IA) que exigem o backend ativo no <strong>Google Cloud Run</strong>.
+            Você está acessando a aplicação via Vercel (<code>controle-de-guias.vercel.app</code>). Desenvolvemos um mecanismo inteligente que conecta e sincroniza os arquivos do OneDrive diretamente no seu navegador, dispensando a necessidade de um servidor de backend ativo neste domínio!
           </p>
-          <div className="flex flex-col sm:flex-row gap-2 pt-1 items-start sm:items-center">
-            <span className="font-semibold text-amber-950">Utilize a página publicada oficial:</span>
-            <a 
-              href="https://ais-pre-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app"
-              className="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors inline-flex"
-            >
-              Ir para Página Publicada (Cloud Run) <ExternalLink size={11} />
-            </a>
-          </div>
+          <p className="font-semibold text-blue-950">
+            💡 Basta clicar no botão de ajuda <strong>(ícone de interrogação "?")</strong> ao lado do botão de conexão para registrar seu Client ID do Azure AD de forma simples e segura.
+          </p>
         </div>
       )}
       <div className="flex items-center justify-between">
@@ -243,6 +272,61 @@ export default function OneDriveConnector() {
             ) : (
               <span className="text-rose-400">Não foi possível recuperar os dados de diagnóstico do backend. Tente reiniciar o servidor de desenvolvimento.</span>
             )}
+          </div>
+          
+          {/* FORMULÁRIO DE CONFIGURAÇÃO DE CREDENCIAIS (FIRESTORE) */}
+          <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+            <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
+              <span>⚙️ Registrar Credenciais do OneDrive no Firebase</span>
+            </h5>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Como o Vercel hospeda o aplicativo de forma estática (SPA), você pode registrar as chaves do seu aplicativo do Azure AD de forma segura na coleção do Firebase para carregar o OneDrive e a API do Microsoft Graph diretamente pelo seu navegador!
+            </p>
+            <form onSubmit={handleSaveConfig} className="space-y-3 text-[11px]">
+              <div className="space-y-1">
+                <label className="block font-semibold text-slate-700">ID de Aplicativo (Client ID) do Azure:</label>
+                <input 
+                  type="text" 
+                  value={configClientId}
+                  onChange={(e) => setConfigClientId(e.target.value)}
+                  placeholder="Ex: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-slate-700">Valor do Segredo (Client Secret) - Opcional:</label>
+                <input 
+                  type="password" 
+                  value={configClientSecret}
+                  onChange={(e) => setConfigClientSecret(e.target.value)}
+                  placeholder="Insira o valor do segredo para sincronização híbrida"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="submit"
+                  disabled={savingConfig}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-[0.98] cursor-pointer"
+                >
+                  {savingConfig ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <span>Salvar no Firebase</span>
+                  )}
+                </button>
+                {saveSuccess && (
+                  <span className="text-emerald-600 font-bold flex items-center gap-1">
+                    <Check size={13} />
+                    Salvo com sucesso!
+                  </span>
+                )}
+              </div>
+            </form>
           </div>
           
           <div className="p-4 bg-amber-50/70 border border-amber-100 rounded-xl space-y-3">

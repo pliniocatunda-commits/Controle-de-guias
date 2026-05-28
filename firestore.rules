@@ -127,5 +127,10 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidComprovante(incoming()) && isAdmin();
       allow delete: if isAdmin();
     }
+
+    match /config/onedrive {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
   }
 }

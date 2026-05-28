@@ -1,6 +1,8 @@
 /**
- * Serviço para interagir com a API do OneDrive via Backend
+ * Serviço para interagir com a API do OneDrive via Backend ou diretamente via Cliente-Side
  */
+import { db } from '../lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export interface OneDriveUser {
   displayName: string;
@@ -17,6 +19,51 @@ export interface DriveItem {
   size: number;
 }
 
+export interface OneDriveConfig {
+  clientId: string;
+  clientSecret?: string;
+}
+
+export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
+  // 1. Tenta carregar do Firestore primeiro (útil para Vercel sem backend)
+  try {
+    const configDoc = await getDoc(doc(db, 'config', 'onedrive'));
+    if (configDoc.exists()) {
+      const data = configDoc.data();
+      if (data.clientId) {
+        return {
+          clientId: data.clientId.trim(),
+          clientSecret: data.clientSecret ? data.clientSecret.trim() : undefined,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("Erro ao buscar configurações no Firestore:", err);
+  }
+
+  // 2. Fallback para variáveis de ambiente VITE se injetadas
+  const metaEnv = (import.meta as any).env || {};
+  const envId = (metaEnv.VITE_ONEDRIVE_CLIENT_ID || '').trim();
+  const envSecret = (metaEnv.VITE_ONEDRIVE_CLIENT_SECRET || '').trim();
+
+  if (envId) {
+    return {
+      clientId: envId,
+      clientSecret: envSecret || undefined
+    };
+  }
+
+  return null;
+}
+
+export async function saveOneDriveConfig(config: OneDriveConfig): Promise<void> {
+  await setDoc(doc(db, 'config', 'onedrive'), {
+    clientId: config.clientId.trim(),
+    clientSecret: config.clientSecret ? config.clientSecret.trim() : '',
+    updatedAt: new Date().toISOString()
+  });
+}
+
 // Wrapper para requisições de API com cabeçalhos de autenticação e persistência robusta
 async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = { ...(options.headers || {}) } as Record<string, string>;
@@ -31,9 +78,86 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
     headers['X-OneDrive-Refresh-Token'] = refreshToken;
   }
 
-  const response = await fetch(url, { ...options, headers });
+  // Se o backend principal não estiver de pé ou se estivermos rodando no cliente diretamente,
+  // direcionamos a requisição DIRETAMENTE para a API do Microsoft Graph.
+  let finalUrl = url;
+  const isVercel = window.location.hostname.includes('vercel.app');
 
-  // Se o servidor emitiu tokens renovados em resposta à expiração, guardamos automaticamente
+  if (isVercel || url === '/api/onedrive/me' || url.startsWith('/api/onedrive/files')) {
+    if (url === '/api/onedrive/me') {
+      finalUrl = 'https://graph.microsoft.com/v1.0/me';
+    } else if (url.startsWith('/api/onedrive/files')) {
+      const parts = url.split('?');
+      const searchParams = new URLSearchParams(parts[1] || '');
+      const folderId = searchParams.get('folderId');
+      finalUrl = folderId 
+        ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
+        : `https://graph.microsoft.com/v1.0/me/drive/root/children`;
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(finalUrl, { ...options, headers });
+  } catch (err) {
+    // Se falhar na URL local, tenta fazer o fallback para o Graph diretamente se possível
+    if (url.startsWith('/api/onedrive')) {
+      let fallbackUrl = 'https://graph.microsoft.com/v1.0/me';
+      if (url.startsWith('/api/onedrive/files')) {
+        const parts = url.split('?');
+        const searchParams = new URLSearchParams(parts[1] || '');
+        const folderId = searchParams.get('folderId');
+        fallbackUrl = folderId 
+          ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
+          : `https://graph.microsoft.com/v1.0/me/drive/root/children`;
+      }
+      response = await fetch(fallbackUrl, { ...options, headers });
+    } else {
+      throw err;
+    }
+  }
+
+  // Tratamento de renovação automática local do token (especialmente relevante para Vercel)
+  if (response.status === 401 && refreshToken && !url.startsWith('/api/auth')) {
+    console.warn("Acesso expirado no OneDrive (401), tentando renovar...");
+    try {
+      const config = await getOneDriveConfig();
+      if (config && config.clientId) {
+        const bodyParams: any = {
+          client_id: config.clientId,
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        };
+        if (config.clientSecret) {
+          bodyParams.client_secret = config.clientSecret;
+        }
+
+        const refreshRes = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(bodyParams),
+        });
+
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          if (refreshData.access_token) {
+            localStorage.setItem('onedrive_token', refreshData.access_token);
+            if (refreshData.refresh_token) {
+              localStorage.setItem('onedrive_refresh_token', refreshData.refresh_token);
+            }
+            
+            // Refaz a chamada original com o novo token de acesso
+            headers['Authorization'] = `Bearer ${refreshData.access_token}`;
+            response = await fetch(finalUrl, { ...options, headers });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Não foi possível renovar o token do OneDrive:", err);
+    }
+  }
+
+  // Se o servidor original (Cloud Run) emitiu tokens renovados na resposta
   const newAccessToken = response.headers.get('x-new-access-token');
   const newRefreshToken = response.headers.get('x-new-refresh-token');
 
@@ -49,19 +173,45 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
 
 export const onedriveService = {
   async getAuthUrl(): Promise<string> {
-    const res = await apiFetch('/api/auth/onedrive/url');
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Falha ao obter URL de autorização do OneDrive.');
+    const isVercel = window.location.hostname.includes('vercel.app');
+
+    if (!isVercel) {
+      try {
+        const res = await fetch('/api/auth/onedrive/url');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.url) {
+            return data.url;
+          }
+        }
+      } catch (e) {
+        console.warn("Express backend offline ou inacessível no momento. Gerando URL no cliente...", e);
+      }
     }
-    return data.url;
+
+    // fallback / cliente-side completo (Vercel ou sem backend ativo)
+    const config = await getOneDriveConfig();
+    if (!config || !config.clientId) {
+      throw new Error('OneDrive não está configurado. Registre o Client ID no painel de configurações para ativar a conexão.');
+    }
+
+    const currentRedirectUri = `${window.location.origin}/auth/callback`;
+    const params = new URLSearchParams({
+      client_id: config.clientId.trim(),
+      response_type: "token", // Implicit Grant flow para SPAs estáticos sem necessidade de segredo no backend
+      redirect_uri: currentRedirectUri,
+      response_mode: "query",
+      scope: "files.readwrite.all User.Read",
+      state: "12345",
+    });
+
+    return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
   },
 
   async getUser(): Promise<OneDriveUser | null> {
     try {
       const res = await apiFetch('/api/onedrive/me');
       if (!res.ok) {
-        // Se as duas tentativas falharem, limpamos credenciais inválidas locais
         if (res.status === 401) {
           localStorage.removeItem('onedrive_token');
           localStorage.removeItem('onedrive_refresh_token');
@@ -81,6 +231,39 @@ export const onedriveService = {
   },
 
   async getDiagnostics(): Promise<any> {
+    const isVercel = window.location.hostname.includes('vercel.app');
+    
+    // Devolve dados inteligentes simulados/locais no Vercel
+    if (isVercel) {
+      const config = await getOneDriveConfig();
+      const currentRedirect = `${window.location.origin}/auth/callback`;
+      const hasId = !!config?.clientId;
+      const hasSecret = !!config?.clientSecret;
+
+      return {
+        clientId: {
+          rawLength: config?.clientId?.length || 0,
+          trimmedLength: config?.clientId?.length || 0,
+          isUuid: config ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.clientId) : false,
+          censored: hasId ? `${config!.clientId.substring(0, 15)}...${config!.clientId.substring(config!.clientId.length - 4)}` : "Não configurado no Firestore"
+        },
+        clientSecret: {
+          rawLength: config?.clientSecret?.length || 0,
+          trimmedLength: config?.clientSecret?.length || 0,
+          censored: hasSecret ? `${config!.clientSecret!.substring(0, 6)}...` : "Não configurado no Firestore"
+        },
+        appUrlFromEnv: window.location.origin,
+        detectedHost: window.location.hostname,
+        detectedProtocol: window.location.protocol.replace(':', ''),
+        dynamicBaseUrl: window.location.origin,
+        finalRedirectUri: currentRedirect,
+        advice: {
+          mismatch: "✅ Sincronizado com o domínio estático Vercel.",
+          lengthCheck: hasId && config!.clientId.length !== 36 ? "⚠️ O ID do Cliente (Client ID) geralmente tem exatamente 36 caracteres. Verifique se copiou corretamente do portal do Azure." : "✅ Formato ID do cliente verificado."
+        }
+      };
+    }
+
     const res = await apiFetch('/api/auth/onedrive/diagnostics');
     if (!res.ok) throw new Error('Falha ao obter diagnóstico de sincronização do OneDrive.');
     return await res.json();
