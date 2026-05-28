@@ -129,8 +129,7 @@ service cloud.firestore {
     }
 
     match /config/onedrive {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read, write: if isSignedIn();
     }
   }
 }
