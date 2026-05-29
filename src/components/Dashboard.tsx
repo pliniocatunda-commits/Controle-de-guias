@@ -270,22 +270,25 @@ export default function Dashboard() {
         <StatCard 
           title="Total de Guias" 
           value={totalGuias} 
-          icon={<FileText className="w-5 h-5" />} 
-          color="text-blue-600 bg-blue-50/40 border border-blue-100"
+          icon={<FileText className="w-5.5 h-5.5" />} 
+          gradient="bg-gradient-to-br from-[#1E40AF] via-[#2563EB] to-[#1D4ED8]"
+          borderClass="border border-blue-400/20 shadow-lg shadow-blue-500/5 hover:shadow-blue-500/10"
           trend={selectedMes === 'todos' && selectedAno === 'todos' ? "Filtro: Todos os Períodos" : "Referente ao período filtrado"}
         />
         <StatCard 
           title="Total de Comprovantes" 
           value={totalComprovantes} 
-          icon={<FileCheck className="w-5 h-5" />} 
-          color="text-emerald-600 bg-emerald-50/40 border border-emerald-100"
+          icon={<FileCheck className="w-5.5 h-5.5" />} 
+          gradient="bg-gradient-to-br from-[#065F46] via-[#10B981] to-[#047857]"
+          borderClass="border border-emerald-400/20 shadow-lg shadow-emerald-500/5 hover:shadow-emerald-500/10"
           trend={`${totalGuias > 0 ? Math.round((totalComprovantes / totalGuias) * 100) : 0}% guias comprovadas`}
         />
         <StatCard 
           title="Valor Total Recebido" 
           value={formatBRLValue(valorTotalPago)} 
-          icon={<DollarSign className="w-5 h-5" />} 
-          color="text-zinc-900 bg-zinc-50 border border-zinc-200/50"
+          icon={<DollarSign className="w-5.5 h-5.5" />} 
+          gradient="bg-gradient-to-br from-[#5B21B6] via-[#7C3AED] to-[#6D28D9]"
+          borderClass="border border-purple-400/20 shadow-lg shadow-purple-500/5 hover:shadow-purple-500/10"
           trend="Total comprovado em contas"
         />
       </div>
@@ -335,21 +338,37 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ title, value, icon, color, trend }: { title: string, value: string | number, icon: React.ReactNode, color: string, trend: string }) {
+function StatCard({ 
+  title, 
+  value, 
+  icon, 
+  gradient, 
+  borderClass, 
+  trend 
+}: { 
+  title: string; 
+  value: string | number; 
+  icon: React.ReactNode; 
+  gradient: string; 
+  borderClass: string; 
+  trend: string;
+}) {
   return (
     <motion.div 
-      whileHover={{ y: -3 }}
-      className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:border-gray-200 transition-all flex flex-col justify-between"
+      whileHover={{ y: -3, scale: 1.01 }}
+      className={`p-6 rounded-2xl transition-all flex flex-col justify-between ${gradient} ${borderClass}`}
     >
-      <div className="flex justify-between items-center mb-5">
-        <div className={`p-3 rounded-xl ${color}`}>
+      <div className="flex justify-between items-start gap-4 mb-6">
+        <div className="p-3 rounded-xl bg-white/10 text-white border border-white/20 backdrop-blur-md flex items-center justify-center">
           {icon}
         </div>
-        <span className="text-[11px] text-gray-400 font-bold bg-gray-50/70 border border-gray-100 py-1 px-2.5 rounded-full uppercase tracking-wider">{trend}</span>
+        <span className="text-[10px] font-bold text-white/90 bg-white/10 hover:bg-white/15 transition-colors border border-white/15 px-3 py-1.5 rounded-xl uppercase tracking-wider backdrop-blur-md text-right leading-normal max-w-[240px] break-words">
+          {trend}
+        </span>
       </div>
       <div>
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest text-[10px]">{title}</p>
-        <h4 className="text-3xl font-black mt-1.5 text-gray-905">{value}</h4>
+        <p className="text-[10px] font-black text-white/70 uppercase tracking-widest">{title}</p>
+        <h4 className="text-3xl font-black mt-1.5 text-white tracking-tight">{value}</h4>
       </div>
     </motion.div>
   );

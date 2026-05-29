@@ -263,7 +263,6 @@ export default function App() {
             </p>
           </div>
           <div className="text-xs text-gray-400 space-y-1">
-            <p className="uppercase tracking-widest text-[10px] text-gray-500">© 2024 GestiPrev Solution Arch</p>
             <p className="font-medium text-slate-300">© 2026 LPC sistemas e assessoria. Todos os direitos reservados.</p>
           </div>
         </div>
