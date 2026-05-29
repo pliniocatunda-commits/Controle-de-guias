@@ -83,7 +83,7 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
   let finalUrl = url;
   const isVercel = window.location.hostname.includes('vercel.app');
 
-  if (isVercel || url === '/api/onedrive/me' || url.startsWith('/api/onedrive/files')) {
+  if (isVercel) {
     if (url === '/api/onedrive/me') {
       finalUrl = 'https://graph.microsoft.com/v1.0/me';
     } else if (url.startsWith('/api/onedrive/files')) {
