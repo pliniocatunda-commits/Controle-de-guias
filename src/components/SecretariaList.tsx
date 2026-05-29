@@ -18,7 +18,22 @@ export default function SecretariaList({ onSelect, onSelectDepartments }: { onSe
   const fetchSecretarias = async () => {
     try {
       const snapshot = await getDocs(collection(db, 'secretarias'));
-      setSecretarias(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Secretaria)));
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Secretaria));
+      list.sort((a, b) => {
+        const getTimestamp = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.toDate === 'function') return val.toDate().getTime();
+          if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+          if (val instanceof Date) return val.getTime();
+          if (typeof val === 'number') return val;
+          return new Date(val).getTime() || 0;
+        };
+        const timeA = getTimestamp(a.createdAt);
+        const timeB = getTimestamp(b.createdAt);
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.nome || '').localeCompare(b.nome || '');
+      });
+      setSecretarias(list);
     } catch (error) {
       console.error(error);
     } finally {

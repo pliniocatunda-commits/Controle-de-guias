@@ -78,7 +78,22 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     try {
       const q = query(collection(db, 'departamentos'), where('secretariaId', '==', secretariaId));
       const snapshot = await getDocs(q);
-      setDepartamentos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Departamento)));
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Departamento));
+      list.sort((a, b) => {
+        const getTimestamp = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.toDate === 'function') return val.toDate().getTime();
+          if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+          if (val instanceof Date) return val.getTime();
+          if (typeof val === 'number') return val;
+          return new Date(val).getTime() || 0;
+        };
+        const timeA = getTimestamp(a.createdAt);
+        const timeB = getTimestamp(b.createdAt);
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.nome || '').localeCompare(b.nome || '');
+      });
+      setDepartamentos(list);
     } catch (error) {
       console.error(error);
     } finally {
