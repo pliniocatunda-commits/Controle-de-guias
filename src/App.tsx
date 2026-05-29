@@ -25,6 +25,7 @@ import ComprovanteList from './components/ComprovanteList';
 import OneDriveManager from './components/OneDriveManager';
 import OneDriveConnector from './components/OneDriveConnector';
 import { motion, AnimatePresence } from 'motion/react';
+import { onedriveService, OneDriveUser } from './services/onedriveService';
 
 type Screen = 'dashboard' | 'secretarias' | 'guias' | 'comprovantes' | 'config' | 'onedrive';
 
@@ -37,6 +38,9 @@ export default function App() {
   const [selectedSecForDepts, setSelectedSecForDepts] = useState<string | undefined>();
   const [selectedDept, setSelectedDept] = useState<string | undefined>();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [isProfileOpen, setProfileOpen] = useState(false);
+  const [onedriveUser, setOnedriveUser] = useState<OneDriveUser | null>(null);
+  const [loadingOnedriveUser, setLoadingOnedriveUser] = useState(false);
 
   const isAuthCallback = window.location.pathname.includes('/auth/callback') || 
                          window.location.hash.includes('access_token=') || 
@@ -145,6 +149,73 @@ export default function App() {
     }
   };
   const handleLogout = () => signOut(auth);
+
+  const checkOneDriveStatus = async () => {
+    const token = localStorage.getItem('onedrive_token');
+    if (!token) {
+      setOnedriveUser(null);
+      return;
+    }
+    setLoadingOnedriveUser(true);
+    try {
+      const userData = await onedriveService.getUser();
+      setOnedriveUser(userData);
+    } catch (e) {
+      console.error("Erro ao verificar OneDrive no App level:", e);
+      setOnedriveUser(null);
+    } finally {
+      setLoadingOnedriveUser(false);
+    }
+  };
+
+  useEffect(() => {
+    // Só verifica status se o usuário estiver autenticado no Firebase
+    if (user) {
+      checkOneDriveStatus();
+    } else {
+      setOnedriveUser(null);
+    }
+    
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'ONEDRIVE_AUTH_SUCCESS') {
+        const { token, refreshToken } = event.data;
+        if (token) {
+          localStorage.setItem('onedrive_token', token);
+        }
+        if (refreshToken) {
+          localStorage.setItem('onedrive_refresh_token', refreshToken);
+        }
+        checkOneDriveStatus();
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [user]);
+
+  const handleOneDriveDisconnect = () => {
+    localStorage.removeItem('onedrive_token');
+    localStorage.removeItem('onedrive_refresh_token');
+    setOnedriveUser(null);
+    setProfileOpen(false);
+    window.location.reload();
+  };
+
+  const handleOneDriveConnect = async () => {
+    setProfileOpen(false);
+    try {
+      const url = await onedriveService.getAuthUrl();
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      window.open(url, 'onedrive_auth', `width=${width},height=${height},left=${left},top=${top}`);
+    } catch (err: any) {
+      alert(err.message || "Não foi possível iniciar a conexão com o OneDrive. Certifique-se de configurar o Client ID nas Configurações.");
+      setActiveScreen('config');
+    }
+  };
 
   const resetSelection = () => {
     setSelectedSec(undefined);
@@ -312,15 +383,130 @@ export default function App() {
                </h2>
              </div>
           </div>
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-4 shrink-0 relative">
              <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400 font-semibold">
                <span onClick={() => { setActiveScreen('dashboard'); resetSelection(); }} className="hover:text-black cursor-pointer transition-colors">Início</span>
                <span>/</span>
                <span className="text-black font-semibold capitalize">{activeScreen}</span>
              </div>
              <div className="w-px h-6 bg-gray-200 hidden sm:block" />
-             <div className="w-10 h-10 rounded-full border border-gray-200 flex items-center justify-center p-1 cursor-pointer hover:bg-gray-50">
-                <UserIcon className="w-5 h-5 text-gray-400" />
+             
+             {/* Profile button container */}
+             <div className="relative">
+               <button 
+                 id="user-profile-toggle"
+                 onClick={() => setProfileOpen(!isProfileOpen)}
+                 className="w-10 h-10 rounded-full border border-gray-200 flex items-center justify-center overflow-hidden cursor-pointer hover:bg-gray-50 bg-white shadow-sm hover:border-gray-300 transition-all focus:outline-none"
+               >
+                 {user?.photoURL ? (
+                   <img src={user.photoURL} alt={profile?.nome || 'Usuário'} className="w-full h-full object-cover" />
+                 ) : (
+                   <UserIcon className="w-5 h-5 text-gray-400" />
+                 )}
+               </button>
+               
+               {/* Dropdown Menu */}
+               <AnimatePresence>
+                 {isProfileOpen && (
+                   <>
+                     {/* Overlay transparent background */}
+                     <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
+                     
+                     <motion.div
+                       id="user-profile-dropdown"
+                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                       animate={{ opacity: 1, y: 0, scale: 1 }}
+                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                       className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-gray-100 shadow-xl overflow-hidden z-50 py-2 origin-top-right font-sans"
+                     >
+                       {/* Header: User Info */}
+                       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">
+                         <div className="w-11 h-11 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-gray-200">
+                           {user?.photoURL ? (
+                             <img src={user.photoURL} alt={profile?.nome || 'Usuário'} className="w-full h-full object-cover" />
+                           ) : (
+                             <UserIcon className="w-6 h-6 text-gray-400 m-2.5" />
+                           )}
+                         </div>
+                         <div className="overflow-hidden">
+                           <p className="text-sm font-bold text-gray-900 truncate">{profile?.nome || 'Usuário'}</p>
+                           <p className="text-[10px] text-gray-500 truncate">{profile?.email || user?.email}</p>
+                           <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">
+                             {profile?.role || 'Apoiador'}
+                           </span>
+                         </div>
+                       </div>
+
+                       {/* OneDrive Integration Section */}
+                       <div className="px-5 py-3 border-b border-gray-100 bg-slate-50/50">
+                         <div className="flex items-center justify-between mb-2">
+                           <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Microsoft OneDrive</span>
+                           <span className={`w-2 h-2 rounded-full ${onedriveUser ? 'bg-emerald-500 animate-pulse' : 'bg-rose-400'}`} />
+                         </div>
+                         
+                         {loadingOnedriveUser ? (
+                           <div className="flex items-center gap-1.5 py-1.5 text-xs text-gray-400">
+                             <div className="w-3.5 h-3.5 border-2 border-slate-350 border-t-transparent rounded-full animate-spin shrink-0" />
+                             <span>Consultando OneDrive...</span>
+                           </div>
+                         ) : onedriveUser ? (
+                           <div className="space-y-2">
+                             <div className="text-xs text-slate-705">
+                               <p className="font-bold truncate">{onedriveUser.displayName}</p>
+                               <p className="text-[10px] text-slate-400 truncate">{onedriveUser.userPrincipalName}</p>
+                             </div>
+                             <button
+                               id="onedrive-disconnect-btn"
+                               onClick={handleOneDriveDisconnect}
+                               className="w-full py-2 px-3 border border-rose-100 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-[0.98] cursor-pointer"
+                             >
+                               Desconectar OneDrive
+                             </button>
+                           </div>
+                         ) : (
+                           <div className="space-y-2">
+                             <p className="text-[11px] text-gray-500 leading-normal">Seu OneDrive não está conectado a este navegador.</p>
+                             <button
+                               id="onedrive-connect-btn"
+                               onClick={handleOneDriveConnect}
+                               className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] cursor-pointer"
+                             >
+                               Conectar OneDrive
+                             </button>
+                           </div>
+                         )}
+                       </div>
+
+                       {/* Actions list */}
+                       <div className="px-2 pt-2">
+                         <button
+                           id="dropdown-goto-config"
+                           onClick={() => {
+                             setActiveScreen('config');
+                             resetSelection();
+                             setProfileOpen(false);
+                           }}
+                           className="w-full flex items-center gap-2.5 px-3 py-2 text-gray-700 hover:bg-gray-50 rounded-xl text-xs font-medium transition-colors"
+                         >
+                           <Settings className="w-4 h-4 text-gray-400" />
+                           <span>Configurações</span>
+                         </button>
+                         <button
+                           id="dropdown-logout"
+                           onClick={() => {
+                             handleLogout();
+                             setProfileOpen(false);
+                           }}
+                           className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-colors"
+                         >
+                           <LogOut className="w-4 h-4 text-rose-400" />
+                           <span>Sair do GestiPrev</span>
+                         </button>
+                       </div>
+                     </motion.div>
+                   </>
+                 )}
+               </AnimatePresence>
              </div>
           </div>
         </header>
