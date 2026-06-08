@@ -13,7 +13,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { uploadFile } from "../lib/storage";
-import { Guia, Departamento, Comprovante } from "../types";
+import { Guia, Departamento, Comprovante, Secretaria } from "../types";
 import {
   FileText,
   Calendar,
@@ -88,12 +88,15 @@ const handleBRLChange = (valStr: string): string => {
 export default function GuiaList({
   departamentoId,
   onBack,
+  role,
 }: {
   departamentoId?: string;
   onBack: () => void;
+  role?: string;
 }) {
   const [guias, setGuias] = useState<Guia[]>([]);
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
+  const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [mesReferencia, setMesReferencia] = useState(new Date().getMonth() + 1);
   const [anoFiscal, setAnoFiscal] = useState(new Date().getFullYear());
@@ -167,24 +170,66 @@ export default function GuiaList({
   const [modalValorStr, setModalValorStr] = useState("");
   const [tempValues, setTempValues] = useState<Record<string, string>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [isExtractingAi, setIsExtractingAi] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
       try {
-        let deptQuery = query(
-          collection(db, "departamentos"),
-          orderBy("nome", "asc"),
+        // Fetch and sort secretarias
+        const secSnap = await getDocs(collection(db, "secretarias"));
+        const secs = secSnap.docs.map(
+          (d) => ({ id: d.id, ...d.data() }) as Secretaria,
         );
-        if (departamentoId) {
-          // If we have a specific dept, we filter. BUT usually the grid is for multiple depts.
-          // The user requested a "consolidated grid view", so we'll show all but highlight or filter.
-          // Let's stick to the consolidated view (all depts) as per request.
-        }
-        const deptSnap = await getDocs(deptQuery);
-        const depts = deptSnap.docs.map(
+        secs.sort((a, b) => {
+          const getTimestamp = (val: any) => {
+            if (!val) return 0;
+            if (typeof val.toDate === "function") return val.toDate().getTime();
+            if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+            if (val instanceof Date) return val.getTime();
+            if (typeof val === "number") return val;
+            return new Date(val).getTime() || 0;
+          };
+          const timeA = getTimestamp(a.createdAt);
+          const timeB = getTimestamp(b.createdAt);
+          if (timeA !== timeB) return timeA - timeB;
+          return (a.nome || "").localeCompare(b.nome || "");
+        });
+        setSecretarias(secs);
+
+        // Fetch departments
+        const deptSnap = await getDocs(collection(db, "departamentos"));
+        let depts = deptSnap.docs.map(
           (d) => ({ id: d.id, ...d.data() }) as Departamento,
         );
+
+        if (departamentoId) {
+          depts = depts.filter((d) => d.id === departamentoId);
+        }
+
+        // Sort departments by:
+        // 1. Secretaria position in sorted `secs`
+        // 2. Departamento's own createdAt timestamp -> nome
+        const secOrder = new Map(secs.map((s, idx) => [s.id, idx]));
+        depts.sort((a, b) => {
+          const orderA = secOrder.get(a.secretariaId) ?? Infinity;
+          const orderB = secOrder.get(b.secretariaId) ?? Infinity;
+          if (orderA !== orderB) return orderA - orderB;
+
+          const getTimestamp = (val: any) => {
+            if (!val) return 0;
+            if (typeof val.toDate === "function") return val.toDate().getTime();
+            if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+            if (val instanceof Date) return val.getTime();
+            if (typeof val === "number") return val;
+            return new Date(val).getTime() || 0;
+          };
+          const timeA = getTimestamp(a.createdAt);
+          const timeB = getTimestamp(b.createdAt);
+          if (timeA !== timeB) return timeA - timeB;
+          return (a.nome || "").localeCompare(b.nome || "");
+        });
+
         setDepartamentos(depts);
 
         const q = query(
@@ -212,6 +257,7 @@ export default function GuiaList({
     field: string,
     value: any,
   ) => {
+    if (role === "consulta") return;
     try {
       await updateDoc(doc(db, "guias", guiaId), { [field]: value });
       setGuias((prev) =>
@@ -255,6 +301,51 @@ export default function GuiaList({
     });
     setModalValorStr(formatBRL(initialVal));
     setIsFormModalOpen(true);
+
+    // AI extração em background
+    const runAiExtraction = async () => {
+      setIsExtractingAi(true);
+      try {
+        const fileToBase64 = (f: File): Promise<string> => {
+          return new Promise((resolve) => {
+            const r = new FileReader();
+            r.readAsDataURL(f);
+            r.onload = () => resolve((r.result as string).split(',')[1]);
+          });
+        };
+        const base64Str = await fileToBase64(file);
+        const res = await fetch("/api/gemini/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64Data: base64Str,
+            mimeType: file.type || "application/pdf",
+            filename: file.name,
+            type: uploadContext.target
+          })
+        });
+        if (res.ok) {
+          const result = await res.json();
+          const cleanCode = result.identificacaoGrcp 
+            ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+            : "";
+          const extractedValue = uploadContext.target === "guia" 
+            ? (result.valor || 0) 
+            : (result.valorPago || 0);
+
+          setUploadForm({
+            valor: extractedValue,
+            identificacaoGrcp: cleanCode || result.identificacaoGrcp || "",
+          });
+          setModalValorStr(formatBRL(extractedValue));
+        }
+      } catch (err) {
+        console.error("Erro extração AI background:", err);
+      } finally {
+        setIsExtractingAi(false);
+      }
+    };
+    runAiExtraction();
   };
 
   const handleConfirmUpload = async () => {
@@ -563,6 +654,7 @@ export default function GuiaList({
                 departamentos.map((dept) => {
                   const patData = getGuiaData(dept.id, "patronal");
                   const segData = getGuiaData(dept.id, "segurado");
+                  const sec = secretarias.find((s) => s.id === dept.secretariaId);
 
                   return (
                     <tr
@@ -570,6 +662,13 @@ export default function GuiaList({
                       className="hover:bg-gray-50 transition-colors group"
                     >
                       <td className="py-3 px-6 border-r border-gray-200 max-w-[240px]">
+                        {sec && (
+                          <div className="mb-0.5">
+                            <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded-md font-extrabold text-[8px] uppercase tracking-wider">
+                              {sec.sigla || sec.nome}
+                            </span>
+                          </div>
+                        )}
                         <p className="font-black text-gray-900 text-[10px] tracking-tight leading-normal whitespace-normal break-words">
                           {dept.nome}
                         </p>
@@ -589,7 +688,8 @@ export default function GuiaList({
                           {patData ? (
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
+                              disabled={role === "consulta"}
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={patData.identificacaoGrcp || ""}
                               onChange={(e) =>
                                 handleInlineUpdate(
@@ -614,7 +714,8 @@ export default function GuiaList({
                             </span>
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              disabled={role === "consulta"}
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[patData.id] !== undefined
                                   ? tempValues[patData.id]
@@ -675,40 +776,46 @@ export default function GuiaList({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteGuia(patData.id)}
-                              className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() =>
-                                triggerUpload(dept.id, "patronal", "guia")
-                              }
-                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
-                              title="Upload Manual"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                            {dept.onedriveFolderId && (
+                            {role !== "consulta" && (
                               <button
-                                onClick={() =>
-                                  setOneDrivePickContext({
-                                    deptId: dept.id,
-                                    tipo: "patronal",
-                                    target: "guia",
-                                  })
-                                }
-                                className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                title="Vincular do OneDrive"
+                                onClick={() => handleDeleteGuia(patData.id)}
+                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
                               >
-                                <Cloud size={14} />
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
+                        ) : (
+                          role !== "consulta" ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() =>
+                                  triggerUpload(dept.id, "patronal", "guia")
+                                }
+                                className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
+                                title="Upload Manual"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                              {dept.onedriveFolderId && (
+                                <button
+                                  onClick={() =>
+                                    setOneDrivePickContext({
+                                      deptId: dept.id,
+                                      tipo: "patronal",
+                                      target: "guia",
+                                    })
+                                  }
+                                  className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                  title="Vincular do OneDrive"
+                                >
+                                  <Cloud size={14} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                          )
                         )}
                       </td>
                       <td className="p-2 text-center border-r border-gray-200">
@@ -725,12 +832,37 @@ export default function GuiaList({
                             </a>
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              triggerUpload(dept.id, "patronal", "comprovante")
-                            }
-                            className="w-7 h-7 bg-transparent mx-auto"
-                          ></button>
+                          role !== "consulta" ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() =>
+                                  triggerUpload(dept.id, "patronal", "comprovante")
+                                }
+                                className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
+                                title="Upload Comprovante"
+                              >
+                                <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
+                              </button>
+                              {dept.onedriveFolderId && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOneDrivePickContext({
+                                      deptId: dept.id,
+                                      tipo: "patronal",
+                                      target: "comprovante",
+                                    })
+                                  }
+                                  className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                  title="Vincular Comprovante do OneDrive"
+                                >
+                                  <Cloud size={12} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-[10px]">—</span>
+                          )
                         )}
                       </td>
 
@@ -740,7 +872,8 @@ export default function GuiaList({
                           {segData ? (
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
+                              disabled={role === "consulta"}
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={segData.identificacaoGrcp || ""}
                               onChange={(e) =>
                                 handleInlineUpdate(
@@ -765,7 +898,8 @@ export default function GuiaList({
                             </span>
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              disabled={role === "consulta"}
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[segData.id] !== undefined
                                   ? tempValues[segData.id]
@@ -826,40 +960,46 @@ export default function GuiaList({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteGuia(segData.id)}
-                              className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() =>
-                                triggerUpload(dept.id, "segurado", "guia")
-                              }
-                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
-                              title="Upload Manual"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                            {dept.onedriveFolderId && (
+                            {role !== "consulta" && (
                               <button
-                                onClick={() =>
-                                  setOneDrivePickContext({
-                                    deptId: dept.id,
-                                    tipo: "segurado",
-                                    target: "guia",
-                                  })
-                                }
-                                className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                title="Vincular do OneDrive"
+                                onClick={() => handleDeleteGuia(segData.id)}
+                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
                               >
-                                <Cloud size={14} />
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
+                        ) : (
+                          role !== "consulta" ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() =>
+                                  triggerUpload(dept.id, "segurado", "guia")
+                                }
+                                className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
+                                title="Upload Manual"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                              {dept.onedriveFolderId && (
+                                <button
+                                  onClick={() =>
+                                    setOneDrivePickContext({
+                                      deptId: dept.id,
+                                      tipo: "segurado",
+                                      target: "guia",
+                                    })
+                                  }
+                                  className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                  title="Vincular do OneDrive"
+                                >
+                                  <Cloud size={14} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                          )
                         )}
                       </td>
                       <td className="p-2 text-center">
@@ -876,12 +1016,37 @@ export default function GuiaList({
                             </a>
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              triggerUpload(dept.id, "segurado", "comprovante")
-                            }
-                            className="w-7 h-7 bg-transparent mx-auto"
-                          ></button>
+                          role !== "consulta" ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() =>
+                                  triggerUpload(dept.id, "segurado", "comprovante")
+                                }
+                                className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
+                                title="Upload Comprovante"
+                              >
+                                <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
+                              </button>
+                              {dept.onedriveFolderId && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOneDrivePickContext({
+                                      deptId: dept.id,
+                                      tipo: "segurado",
+                                      target: "comprovante",
+                                    })
+                                  }
+                                  className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                  title="Vincular Comprovante do OneDrive"
+                                >
+                                  <Cloud size={12} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-[10px]">—</span>
+                          )
                         )}
                       </td>
                     </tr>
@@ -941,6 +1106,7 @@ export default function GuiaList({
               </div>
 
               <OneDriveExplorer
+                persistenceKey={oneDrivePickContext.target}
                 initialFolderId={
                   departamentos.find((d) => d.id === oneDrivePickContext.deptId)
                     ?.onedriveFolderId
@@ -1069,6 +1235,13 @@ export default function GuiaList({
                   <X className="w-6 h-6" />
                 </button>
               </div>
+
+              {isExtractingAi && (
+                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-100 px-4 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse mb-6">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>Preenchendo automaticamente com IA...</span>
+                </div>
+              )}
 
               <div className="space-y-6">
                 <div>

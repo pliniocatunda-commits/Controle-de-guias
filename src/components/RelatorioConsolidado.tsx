@@ -37,6 +37,7 @@ import {
   File,
   Link as LinkIcon,
   Layers,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
@@ -137,6 +138,7 @@ export default function RelatorioConsolidado({
   });
   const [modalValorStr, setModalValorStr] = useState("");
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [isExtractingAi, setIsExtractingAi] = useState(false);
 
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -392,6 +394,51 @@ export default function RelatorioConsolidado({
     });
     setModalValorStr(formatBRL(initialVal));
     setIsFormModalOpen(true);
+
+    // AI extração em background
+    const runAiExtraction = async () => {
+      setIsExtractingAi(true);
+      try {
+        const fileToBase64 = (f: File): Promise<string> => {
+          return new Promise((resolve) => {
+            const r = new FileReader();
+            r.readAsDataURL(f);
+            r.onload = () => resolve((r.result as string).split(',')[1]);
+          });
+        };
+        const base64Str = await fileToBase64(file);
+        const res = await fetch("/api/gemini/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64Data: base64Str,
+            mimeType: file.type || "application/pdf",
+            filename: file.name,
+            type: uploadContext.target
+          })
+        });
+        if (res.ok) {
+          const result = await res.json();
+          const cleanCode = result.identificacaoGrcp 
+            ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+            : "";
+          const extractedValue = uploadContext.target === "guia" 
+            ? (result.valor || 0) 
+            : (result.valorPago || 0);
+
+          setUploadForm({
+            valor: extractedValue,
+            identificacaoGrcp: cleanCode || result.identificacaoGrcp || "",
+          });
+          setModalValorStr(formatBRL(extractedValue));
+        }
+      } catch (err) {
+        console.error("Erro extração AI background no consolidado:", err);
+      } finally {
+        setIsExtractingAi(false);
+      }
+    };
+    runAiExtraction();
   };
 
   const handleConfirmUpload = async () => {
@@ -1248,6 +1295,13 @@ export default function RelatorioConsolidado({
                 </button>
               </div>
 
+              {isExtractingAi && (
+                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-100 px-4 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse mb-6">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>Preenchendo automaticamente com IA...</span>
+                </div>
+              )}
+
               <div className="space-y-6">
                 <div>
                   <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
@@ -1503,6 +1557,7 @@ export default function RelatorioConsolidado({
                             Navegue e escolha o arquivo PDF:
                           </p>
                           <OneDriveExplorer
+                            persistenceKey={linkContext.target}
                             initialFolderId={
                               departamentos.find(
                                 (d) => d.id === linkContext.deptId,

@@ -11,12 +11,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isMasterEmail() {
+      return isSignedIn() && 
+             request.auth.token.keys().hasAll(['email']) && 
+             request.auth.token.email.matches('(?i)pliniocatunda@gmail\\.com');
+    }
+
     function getUserData() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
     function isAdmin() {
-      return isSignedIn() && getUserData().role == 'admin';
+      return isSignedIn() && (
+        isMasterEmail() || 
+        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && 
+         (getUserData().role == 'admin' || getUserData().role == 'master'))
+      );
     }
 
     function isSecretariaAdmin(secretariaId) {
@@ -75,7 +85,7 @@ service cloud.firestore {
       return data.keys().hasAll(['nome', 'email', 'role']) &&
              data.nome is string &&
              data.email is string &&
-             data.role in ['admin', 'secretaria_admin', 'departamento_user'];
+             data.role in ['master', 'admin', 'consulta', 'secretaria_admin', 'departamento_user'];
     }
 
     // --- Collection Rules ---
@@ -83,11 +93,12 @@ service cloud.firestore {
     match /usuarios/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
-      allow create: if isSignedIn() && request.auth.uid == userId && isValidUsuario(incoming());
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidUsuario(incoming());
       allow update: if isSignedIn() && (
         (request.auth.uid == userId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['nome'])) ||
         isAdmin()
       );
+      allow delete: if isAdmin();
     }
 
     match /secretarias/{secId} {

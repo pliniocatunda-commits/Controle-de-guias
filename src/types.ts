@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'secretaria_admin' | 'departamento_user';
+export type UserRole = 'master' | 'admin' | 'consulta';
 
 export interface Secretaria {
   id: string;
@@ -29,6 +29,7 @@ export interface Guia {
   urlComprovante?: string;
   tipo: 'patronal' | 'segurado';
   identificacaoGrcp?: string;
+  regime?: string;
   createdAt: any;
 }
 
@@ -41,6 +42,8 @@ export interface Comprovante {
   dataPagamento: string;
   valorPago: number;
   urlComprovante: string;
+  urlOriginal?: string;
+  regime?: string;
   observacoes?: string;
   createdAt: any;
 }

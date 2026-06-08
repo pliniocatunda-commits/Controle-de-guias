@@ -57,7 +57,7 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
       
       return {
         file,
-        status: 'pending' as const,
+        status: 'processing' as const,
         progress: 0,
         type: isComprovante ? 'comprovante' : 'guia',
         data: {
@@ -69,11 +69,91 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
           mes: competenciaMes,
           ano: competenciaAno,
           tipo: isSegurado ? 'segurado' : 'patronal',
-          identificacaoGrcp: fname.match(/\d{4}\/PME-[A-Z]{3}\/\d{4}/)?.[0] || `FALTA-EDITAR-${Date.now().toString().slice(-4)}`
+          identificacaoGrcp: fname.match(/\d{4}\/PME-[A-Z]{3}\/\d{4}/)?.[0] || ""
         } as any
       } as FileProcessState;
     });
-    setFiles(prev => [...prev, ...newFiles]);
+
+    setFiles(prev => {
+      const updatedList = [...prev, ...newFiles];
+      
+      newFiles.forEach((fileState, idx) => {
+        const actualIdx = prev.length + idx;
+        
+        const fileToBase64 = (f: File): Promise<string> => {
+          return new Promise((resolve) => {
+            const r = new FileReader();
+            r.readAsDataURL(f);
+            r.onload = () => resolve((r.result as string).split(',')[1]);
+          });
+        };
+
+        const runAsyncExtraction = async () => {
+          try {
+            const b64 = await fileToBase64(fileState.file);
+            const res = await fetch('/api/gemini/extract', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                base64Data: b64,
+                mimeType: fileState.file.type || 'application/pdf',
+                filename: fileState.file.name,
+                type: fileState.type
+              })
+            });
+
+            if (res.ok) {
+              const result = await res.json();
+              setFiles(currentFiles => {
+                const nextFiles = [...currentFiles];
+                if (!nextFiles[actualIdx]) return currentFiles;
+
+                const cleanCode = result.identificacaoGrcp 
+                  ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+                  : "";
+
+                const existingData = (nextFiles[actualIdx].data || {}) as any;
+                nextFiles[actualIdx] = {
+                  ...nextFiles[actualIdx],
+                  status: 'pending',
+                  data: {
+                    ...existingData,
+                    nome: result.nome || existingData.nome,
+                    valor: result.valor !== undefined ? result.valor : existingData.valor,
+                    valorPago: result.valorPago !== undefined ? result.valorPago : existingData.valorPago,
+                    vencimento: result.vencimento || existingData.vencimento,
+                    dataPagamento: result.dataPagamento || existingData.dataPagamento,
+                    mes: result.mes || existingData.mes,
+                    ano: result.ano || existingData.ano,
+                    tipo: result.tipo || existingData.tipo,
+                    identificacaoGrcp: cleanCode || result.identificacaoGrcp || existingData.identificacaoGrcp || ""
+                  } as any
+                };
+                return nextFiles;
+              });
+            } else {
+              throw new Error("Erro de resposta IA");
+            }
+          } catch (err) {
+            console.error("AI Extraction failed on drop:", err);
+            setFiles(currentFiles => {
+              const nextFiles = [...currentFiles];
+              if (nextFiles[actualIdx]) {
+                nextFiles[actualIdx] = {
+                  ...nextFiles[actualIdx],
+                  status: 'pending'
+                };
+              }
+              return nextFiles;
+            });
+          }
+        };
+
+        runAsyncExtraction();
+      });
+
+      return updatedList;
+    });
   }, [competenciaAno, competenciaMes]);
 
   const openEditor = (index: number) => {
@@ -407,6 +487,11 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => item.status === 'error' ? processFiles() : openEditor(idx)}>
                     <p className="text-xs font-bold truncate text-gray-900 group-hover:text-yellow-600 transition-colors uppercase">{item.file.name}</p>
                     <AnimatePresence mode="wait">
+                      {item.status === 'processing' && (
+                        <motion.p key="proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[8px] font-black uppercase text-amber-500 tracking-widest mt-0.5 animate-pulse">
+                          Extraindo dados com Inteligência Artificial...
+                        </motion.p>
+                      )}
                       {item.status === 'pending' && (
                         <motion.p key="pend" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[8px] font-black uppercase text-gray-400 tracking-widest mt-0.5">
                           Clique para conferir dados

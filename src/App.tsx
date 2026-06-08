@@ -10,11 +10,19 @@ import {
   Menu,
   X,
   ShieldCheck,
-  Cloud
+  Cloud,
+  Lock
 } from 'lucide-react';
 import { auth, googleProvider, db } from './lib/firebase';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  sendPasswordResetEmail, 
+  updatePassword 
+} from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { Usuario } from './types';
 import Dashboard from './components/Dashboard';
 import SecretariaList from './components/SecretariaList';
@@ -24,6 +32,8 @@ import GuiaList from './components/GuiaList';
 import ComprovanteList from './components/ComprovanteList';
 import OneDriveManager from './components/OneDriveManager';
 import OneDriveConnector from './components/OneDriveConnector';
+import UsuarioManager from './components/UsuarioManager';
+import ErrorBoundary from './components/ErrorBoundary';
 import { motion, AnimatePresence } from 'motion/react';
 import { onedriveService, OneDriveUser } from './services/onedriveService';
 
@@ -41,6 +51,20 @@ export default function App() {
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [onedriveUser, setOnedriveUser] = useState<OneDriveUser | null>(null);
   const [loadingOnedriveUser, setLoadingOnedriveUser] = useState(false);
+
+  // States for Institutional Login credentials & password modification
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+
+  // States for logged-in user password change inside Profile view
+  const [newProfilePassword, setNewProfilePassword] = useState('');
+  const [passwordUpdateSuccess, setPasswordUpdateSuccess] = useState<string | null>(null);
+  const [passwordUpdateError, setPasswordUpdateError] = useState<string | null>(null);
+  const [updatingPassword, setUpdatingPassword] = useState(false);
 
   const isAuthCallback = window.location.pathname.includes('/auth/callback') || 
                          window.location.hash.includes('access_token=') || 
@@ -110,26 +134,75 @@ export default function App() {
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
-      if (u) {
-        const userDoc = await getDoc(doc(db, 'usuarios', u.uid));
-        if (userDoc.exists()) {
-          setProfile(userDoc.data() as Usuario);
+      try {
+        if (u) {
+          const userDoc = await getDoc(doc(db, 'usuarios', u.uid));
+          const emailLower = u.email?.toLowerCase();
+          
+          if (userDoc.exists()) {
+            const profileData = userDoc.data() as Usuario;
+            // Force master role if user is Pliniocatunda@gmail.com
+            if (emailLower === 'pliniocatunda@gmail.com' && profileData.role !== 'master') {
+              const updatedProfile = { ...profileData, role: 'master' as const };
+              await setDoc(doc(db, 'usuarios', u.uid), updatedProfile, { merge: true });
+              setProfile(updatedProfile);
+            } else {
+              setProfile(profileData);
+            }
+          } else {
+            // Check if there is an existing design/profile created manually by the admin for this email (with temp ID)
+            const q = query(collection(db, "usuarios"), where("email", "==", emailLower));
+            const querySnap = await getDocs(q);
+            
+            if (!querySnap.empty) {
+              const existingDoc = querySnap.docs[0];
+              const existingData = existingDoc.data();
+              const mergedProfile: Usuario = {
+                ...existingData,
+                id: u.uid,
+                email: emailLower || existingData.email,
+              } as Usuario;
+
+              // Write the true UID profile and safely delete the temporary document
+              await setDoc(doc(db, 'usuarios', u.uid), mergedProfile);
+              await deleteDoc(existingDoc.ref);
+              setProfile(mergedProfile);
+            } else {
+              // If profile doc doesn't exist yet, we check if it's the designated master user. Otherwise default to 'consulta'.
+              const isMasterEmail = emailLower === 'pliniocatunda@gmail.com';
+              const newProfile: Usuario = {
+                id: u.uid,
+                nome: u.displayName || u.email?.split('@')[0] || 'Sem Nome',
+                email: u.email || '',
+                role: isMasterEmail ? 'master' : 'consulta', 
+                createdAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'usuarios', u.uid), newProfile);
+              setProfile(newProfile);
+            }
+          }
         } else {
-          // New user setup (default to admin for demo first user)
-          const newProfile: Usuario = {
-            id: u.uid,
-            nome: u.displayName || 'Sem Nome',
-            email: u.email || '',
-            role: 'admin', 
-            createdAt: serverTimestamp()
-          };
-          await setDoc(doc(db, 'usuarios', u.uid), newProfile);
-          setProfile(newProfile);
+          setProfile(null);
         }
-      } else {
-        setProfile(null);
+      } catch (err) {
+        console.error("Erro ao carregar perfil do usuário:", err);
+        // Fallback for forcing profile on master user even on firestore read block
+        if (u) {
+          const emailLower = u.email?.toLowerCase();
+          const isMasterEmail = emailLower === 'pliniocatunda@gmail.com';
+          setProfile({
+            id: u.uid,
+            nome: u.displayName || u.email?.split('@')[0] || 'Sem Nome',
+            email: u.email || '',
+            role: isMasterEmail ? 'master' : 'consulta',
+            createdAt: new Date().toISOString()
+          });
+        } else {
+          setProfile(null);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
   }, []);
 
@@ -148,6 +221,81 @@ export default function App() {
       }
     }
   };
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setLoginLoading(true);
+
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
+    } catch (error: any) {
+      console.error("Erro no login institucional:", error);
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        setLoginError("E-mail e/ou senha incorretos ou usuário inexistente.");
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError("O formato do e-mail é inválido.");
+      } else {
+        setLoginError("Falha na autenticação: " + error.message);
+      }
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setLoginLoading(true);
+
+    try {
+      await sendPasswordResetEmail(auth, loginEmail.trim());
+      setResetEmailSent(true);
+    } catch (error: any) {
+      console.error("Erro ao redefinir senha:", error);
+      if (error.code === 'auth/user-not-found') {
+        setLoginError("A conta com este e-mail não foi localizada.");
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError("O formato do e-mail é inválido.");
+      } else {
+        setLoginError("Não foi possível enviar o reset de senha: " + error.message);
+      }
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleUpdateProfilePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordUpdateSuccess(null);
+    setPasswordUpdateError(null);
+
+    if (newProfilePassword.length < 6) {
+      setPasswordUpdateError("A senha deve conter ao menos 6 caracteres.");
+      return;
+    }
+
+    setUpdatingPassword(true);
+    try {
+      if (auth.currentUser) {
+        await updatePassword(auth.currentUser, newProfilePassword);
+        setPasswordUpdateSuccess("Sua senha foi redefinida com sucesso!");
+        setNewProfilePassword('');
+      } else {
+        setPasswordUpdateError("Sessão expirada. Faça login novamente.");
+      }
+    } catch (error: any) {
+      console.error("Erro ao atualizar senha:", error);
+      if (error.code === 'auth/requires-recent-login') {
+        setPasswordUpdateError("Para alterar sua senha, é necessário realizar login recentemente. Faça logout e logue novamente antes de tentar.");
+      } else {
+        setPasswordUpdateError(error.message || "Erro desconhecido ao redefinir sua senha.");
+      }
+    } finally {
+      setUpdatingPassword(false);
+    }
+  };
+
   const handleLogout = () => signOut(auth);
 
   const checkOneDriveStatus = async () => {
@@ -266,22 +414,142 @@ export default function App() {
             <p className="font-medium text-slate-300">© 2026 LPC sistemas e assessoria. Todos os direitos reservados.</p>
           </div>
         </div>
-        <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-8 relative">
-           <div className="w-full max-w-sm">
-              <h2 className="text-3xl font-bold mb-2">Bem-vindo</h2>
-              <p className="text-gray-500 mb-8">Faça login para acessar o painel administrativo.</p>
-              <button 
-                onClick={handleLogin}
-                className="w-full flex items-center justify-center gap-3 py-4 border-2 border-gray-100 rounded-2xl hover:bg-gray-50 transition-all font-bold text-gray-700 active:scale-[0.98] cursor-pointer"
-              >
-                <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22-.09-.63z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-                </svg>
-                Continuar com Google
-              </button>
+        <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-8 relative overflow-y-auto">
+           <div className="w-full max-w-sm py-12 md:py-0">
+              <h2 className="text-3xl font-extrabold mb-2 text-gray-900 tracking-tight">GestiPrev</h2>
+              <p className="text-gray-500 mb-6 text-sm">Controle de pagamentos previdenciários e guias consolidadas.</p>
+
+              {loginError && (
+                <div className="mb-4 p-3.5 bg-red-50 border border-red-150 text-red-700 rounded-xl text-xs flex gap-2.5 items-center font-medium">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {resetEmailSent && (
+                <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald-150 text-emerald-800 rounded-xl text-xs flex gap-2.5 items-center font-medium">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0" />
+                  <span>E-mail de redefinição enviado com sucesso para o endereço informado! Caso não localize, certifique-se de olhar a pasta de Spam.</span>
+                </div>
+              )}
+
+              {!showPasswordReset ? (
+                <div className="space-y-5">
+                  <form onSubmit={handleEmailLogin} className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">E-mail Institucional</label>
+                      <input 
+                        type="email" 
+                        required
+                        placeholder="nome@eusebio.ce.gov.br" 
+                        value={loginEmail}
+                        onChange={(e) => { setLoginEmail(e.target.value); setLoginError(null); }}
+                        className="w-full text-xs bg-gray-50 border border-gray-200 py-3.5 px-4 rounded-xl focus:border-blue-500 focus:bg-white outline-none transition-all text-gray-900"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Senha de Acesso</label>
+                        <button 
+                          type="button" 
+                          onClick={() => { setShowPasswordReset(true); setResetEmailSent(false); setLoginError(null); }}
+                          className="text-[10px] text-blue-600 hover:underline font-bold transition-all focus:outline-none bg-transparent border-0 cursor-pointer p-0"
+                        >
+                          Esqueceu a senha?
+                        </button>
+                      </div>
+                      <input 
+                        type="password" 
+                        required
+                        placeholder="••••••••" 
+                        value={loginPassword}
+                        onChange={(e) => { setLoginPassword(e.target.value); setLoginError(null); }}
+                        className="w-full text-xs bg-gray-50 border border-gray-200 py-3.5 px-4 rounded-xl focus:border-blue-500 focus:bg-white outline-none transition-all text-gray-900"
+                      />
+                    </div>
+
+                    <button 
+                      type="submit"
+                      disabled={loginLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition-all active:scale-[0.99] disabled:bg-blue-400 cursor-pointer shadow-md shadow-blue-500/15"
+                    >
+                      {loginLoading ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Autenticando...</span>
+                        </>
+                      ) : (
+                        <span>Entrar no Sistema</span>
+                      )}
+                    </button>
+                  </form>
+
+                  <div className="relative flex py-2 items-center">
+                    <div className="flex-grow border-t border-gray-150"></div>
+                    <span className="flex-shrink mx-4 text-[10px] text-gray-400 font-extrabold uppercase tracking-widest">ou acesse com</span>
+                    <div className="flex-grow border-t border-gray-150"></div>
+                  </div>
+
+                  <button 
+                    onClick={handleLogin}
+                    type="button"
+                    className="w-full flex items-center justify-center gap-3 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 bg-white transition-all font-bold text-xs text-gray-700 active:scale-[0.99] cursor-pointer"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22-.09-.63z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                    </svg>
+                    Conta do Administrador (Google)
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Recuperar Senha de Acesso</h3>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    Insira o seu e-mail institucional cadastrado abaixo para receber um link de redefinição de senha diretamente na sua caixa de entrada.
+                  </p>
+                  
+                  <form onSubmit={handlePasswordReset} className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">E-mail Institucional</label>
+                      <input 
+                        type="email" 
+                        required
+                        placeholder="nome@eusebio.ce.gov.br" 
+                        value={loginEmail}
+                        onChange={(e) => { setLoginEmail(e.target.value); setLoginError(null); }}
+                        className="w-full text-xs bg-gray-50 border border-gray-200 py-3.5 px-4 rounded-xl focus:border-blue-500 focus:bg-white outline-none transition-all text-gray-900"
+                      />
+                    </div>
+
+                    <button 
+                      type="submit"
+                      disabled={loginLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition-all active:scale-[0.99] disabled:bg-blue-400 cursor-pointer shadow-md shadow-blue-500/10"
+                    >
+                      {loginLoading ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Enviando link...</span>
+                        </>
+                      ) : (
+                        <span>Enviar E-mail de Recuperação</span>
+                      )}
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={() => { setShowPasswordReset(false); setLoginError(null); }}
+                      className="w-full py-3 border border-gray-150 hover:bg-gray-50 rounded-xl text-xs font-bold text-gray-500 transition-colors cursor-pointer"
+                    >
+                      Voltar ao Login
+                    </button>
+                  </form>
+                </div>
+              )}
            </div>
            
            {/* Footer for mobile/right side panel */}
@@ -544,6 +812,7 @@ export default function App() {
                 <SecretariaList 
                   onSelect={(id) => setSelectedSec(id)} 
                   onSelectDepartments={(id) => setSelectedSecForDepts(id)}
+                  role={profile?.role}
                 />
               </motion.div>
             )}
@@ -559,6 +828,7 @@ export default function App() {
                   secretariaId={selectedSecForDepts} 
                   onBack={() => setSelectedSecForDepts(undefined)} 
                   onSelectDepartamento={(id) => setSelectedDept(id)}
+                  role={profile?.role}
                 />
               </motion.div>
             )}
@@ -587,21 +857,106 @@ export default function App() {
                 <GuiaList 
                   departamentoId={selectedDept} 
                   onBack={() => setSelectedDept(undefined)} 
+                  role={profile?.role}
                 />
               </motion.div>
             )}
 
             {activeScreen === 'config' && (
-              <motion.div 
-                key="config"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="p-8 max-w-[1240px] mx-auto space-y-8"
-              >
-                <div>
-                  <h1 className="text-3xl font-bold tracking-tight text-gray-900">Configurações</h1>
-                  <p className="text-gray-500 text-sm mt-1">Gerencie integrações e preferências do sistema GestiPrev</p>
+              <ErrorBoundary fallbackTitle="Painel de Configurações">
+                <motion.div 
+                  key="config"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  className="p-8 max-w-[1240px] mx-auto space-y-8"
+                >
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">Configurações</h1>
+                    <p className="text-gray-500 text-sm mt-1">Gerencie integrações, perfis e preferências do sistema GestiPrev</p>
+                  </div>
+
+                  {/* Users Management: Visible to Master & Admin users */}
+                  {(profile?.role === 'master' || profile?.role === 'admin') && (
+                    <div className="space-y-4">
+                      <h2 className="text-lg font-bold text-gray-900">Administração de Acesso</h2>
+                      <UsuarioManager currentProfile={profile} />
+                    </div>
+                  )}
+
+                {/* Security settings: Password update */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm space-y-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-gray-550" />
+                      Segurança da Conta (Senha de Acesso)
+                    </h3>
+                    <p className="text-xs text-gray-550 mt-1">
+                      Mantenha suas credenciais seguras alterando sua senha de acesso ao GestiPrev regularmente.
+                    </p>
+                  </div>
+
+                  {passwordUpdateSuccess && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-150 text-emerald-800 rounded-xl text-xs font-semibold">
+                      {passwordUpdateSuccess}
+                    </div>
+                  )}
+
+                  {passwordUpdateError && (
+                    <div className="p-3.5 bg-red-50 border border-red-150 text-red-700 rounded-xl text-xs font-semibold">
+                      {passwordUpdateError}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleUpdateProfilePassword} className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl text-xs">
+                    <div className="space-y-1">
+                      <label className="font-semibold text-gray-400 block uppercase tracking-wider text-[10px]">Nova Senha</label>
+                      <input 
+                        type="password" 
+                        required
+                        placeholder="Mínimo 6 caracteres" 
+                        value={newProfilePassword}
+                        onChange={(e) => setNewProfilePassword(e.target.value)}
+                        className="w-full text-xs bg-gray-50 border border-gray-200 py-3 px-4 rounded-xl focus:border-blue-500 focus:bg-white outline-none transition-all text-gray-900"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <button 
+                        type="submit"
+                        disabled={updatingPassword}
+                        className="w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {updatingPassword ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Alterando...</span>
+                          </>
+                        ) : (
+                          <span>Atualizar Senha</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                  <div className="pt-2 border-t border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs">
+                    <span className="text-gray-500">Deseja usar o link de recuperação para redefinição segura?</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!profile?.email) return;
+                        setPasswordUpdateSuccess(null);
+                        setPasswordUpdateError(null);
+                        try {
+                          await sendPasswordResetEmail(auth, profile.email);
+                          setPasswordUpdateSuccess("E-mail para redefinição de senha enviado para " + profile.email);
+                        } catch (err: any) {
+                          setPasswordUpdateError("Erro ao enviar redefinição por e-mail: " + err.message);
+                        }
+                      }}
+                      className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-xs transition-colors cursor-pointer mt-1 md:mt-0"
+                    >
+                      Enviar E-mail de Recuperação
+                    </button>
+                  </div>
                 </div>
 
                 {/* OneDrive Configuration Integration */}
@@ -635,6 +990,7 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
+             </ErrorBoundary>
             )}
 
             {activeScreen === 'comprovantes' && (

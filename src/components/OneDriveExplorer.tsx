@@ -7,33 +7,37 @@ interface Props {
   initialFolderId?: string;
   onSelectFolder?: (folder: DriveItem) => void;
   onSelectFile?: (file: DriveItem) => void;
+  persistenceKey?: string;
 }
 
-export default function OneDriveExplorer({ initialFolderId, onSelectFolder, onSelectFile }: Props) {
+export default function OneDriveExplorer({ initialFolderId, onSelectFolder, onSelectFile, persistenceKey }: Props) {
   const [items, setItems] = useState<DriveItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const folderKey = persistenceKey ? `onedrive_last_folder_${persistenceKey}` : 'onedrive_last_folder';
+  const historyKey = persistenceKey ? `onedrive_last_history_${persistenceKey}` : 'onedrive_last_history';
+
   const [currentFolder, setCurrentFolder] = useState<{ id: string, name: string } | null>(() => {
     try {
-      const saved = localStorage.getItem('onedrive_last_folder');
+      const saved = localStorage.getItem(folderKey);
       if (saved) {
         return JSON.parse(saved);
       }
     } catch (e) {
-      console.error('Error parsing onedrive_last_folder:', e);
+      console.error(`Error parsing ${folderKey}:`, e);
     }
     return initialFolderId ? { id: initialFolderId, name: 'Pasta Principal' } : null;
   });
 
   const [history, setHistory] = useState<{ id: string, name: string }[]>(() => {
     try {
-      const saved = localStorage.getItem('onedrive_last_history');
+      const saved = localStorage.getItem(historyKey);
       if (saved) {
         return JSON.parse(saved);
       }
     } catch (e) {
-      console.error('Error parsing onedrive_last_history:', e);
+      console.error(`Error parsing ${historyKey}:`, e);
     }
     return [];
   });
@@ -41,22 +45,22 @@ export default function OneDriveExplorer({ initialFolderId, onSelectFolder, onSe
   useEffect(() => {
     try {
       if (currentFolder) {
-        localStorage.setItem('onedrive_last_folder', JSON.stringify(currentFolder));
+        localStorage.setItem(folderKey, JSON.stringify(currentFolder));
       } else {
-        localStorage.removeItem('onedrive_last_folder');
+        localStorage.removeItem(folderKey);
       }
     } catch (e) {
-      console.error('Error saving onedrive_last_folder:', e);
+      console.error(`Error saving ${folderKey}:`, e);
     }
-  }, [currentFolder]);
+  }, [currentFolder, folderKey]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('onedrive_last_history', JSON.stringify(history));
+      localStorage.setItem(historyKey, JSON.stringify(history));
     } catch (e) {
-      console.error('Error saving onedrive_last_history:', e);
+      console.error(`Error saving ${historyKey}:`, e);
     }
-  }, [history]);
+  }, [history, historyKey]);
 
   useEffect(() => {
     fetchItems();

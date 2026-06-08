@@ -6,7 +6,7 @@ import { Building2, Plus, ChevronRight, Search, Pencil, Trash2 } from 'lucide-re
 import { motion } from 'motion/react';
 import ModalConfirmacao from './ModalConfirmacao';
 
-export default function SecretariaList({ onSelect, onSelectDepartments }: { onSelect: (id: string) => void; onSelectDepartments?: (id: string) => void }) {
+export default function SecretariaList({ onSelect, onSelectDepartments, role }: { onSelect: (id: string) => void; onSelectDepartments?: (id: string) => void; role?: string }) {
   const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -96,12 +96,14 @@ export default function SecretariaList({ onSelect, onSelectDepartments }: { onSe
           <h1 className="text-2xl font-bold">Secretarias</h1>
           <p className="text-gray-500">Gestão das unidades administrativas centrais</p>
         </div>
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/10 cursor-pointer text-sm font-semibold"
-        >
-          <Plus className="w-4 h-4" /> Nova Secretaria
-        </button>
+        {role !== 'consulta' && (
+          <button 
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/10 cursor-pointer text-sm font-semibold"
+          >
+            <Plus className="w-4 h-4" /> Nova Secretaria
+          </button>
+        )}
       </header>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -147,18 +149,22 @@ export default function SecretariaList({ onSelect, onSelectDepartments }: { onSe
                       <Building2 className="w-3.5 h-3.5 text-gray-500" /> Departamentos
                     </button>
                   )}
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setEditingSec(sec); }}
-                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={(e) => handleDelete(sec.id, e)}
-                    className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {role !== 'consulta' && (
+                    <>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setEditingSec(sec); }}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDelete(sec.id, e)}
+                        className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                   <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-600 transition-colors" />
                 </div>
               </motion.div>

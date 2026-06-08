@@ -14,9 +14,10 @@ interface DepartamentoListProps {
   secretariaId: string;
   onBack: () => void;
   onSelectDepartamento: (id: string) => void;
+  role?: string;
 }
 
-export default function DepartamentoList({ secretariaId, onBack, onSelectDepartamento }: DepartamentoListProps) {
+export default function DepartamentoList({ secretariaId, onBack, onSelectDepartamento, role }: DepartamentoListProps) {
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [secretaria, setSecretaria] = useState<Secretaria | null>(null);
   const [loading, setLoading] = useState(true);
@@ -247,20 +248,22 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
             <Layers className="w-4 h-4" /> Gerenciamento de Departamentos
           </p>
         </div>
-        <div className="flex gap-3">
-          <button 
-            onClick={() => setShowPayModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 font-bold text-sm"
-          >
-            <Receipt className="w-4 h-4" /> Fechamento Mensal
-          </button>
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold text-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Novo Departamento
-          </button>
-        </div>
+        {role !== 'consulta' && (
+          <div className="flex gap-3">
+            <button 
+              onClick={() => setShowPayModal(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 font-bold text-sm"
+            >
+              <Receipt className="w-4 h-4" /> Fechamento Mensal
+            </button>
+            <button 
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold text-sm cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Novo Departamento
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
@@ -300,20 +303,22 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setEditingDept(dept); }}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={(e) => handleDelete(dept.id, e)}
-                      className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {role !== 'consulta' && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setEditingDept(dept); }}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDelete(dept.id, e)}
+                        className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                   <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-900 group-hover:transform group-hover:translate-x-1 transition-all" />
                 </div>
               </motion.div>
