@@ -294,6 +294,189 @@ async function startServer() {
     }
   });
 
+  // API Route: Extract PDF Data from OneDrive using Gemini
+  app.post("/api/onedrive/extract-ai", async (req, res) => {
+    const { token } = await getValidToken(req, res);
+    if (!token) {
+      return res.status(401).json({ error: "Não autenticado no OneDrive" });
+    }
+
+    const { itemId, type, filename } = req.body;
+    if (!itemId) {
+      return res.status(400).json({ error: "itemId do OneDrive ausente" });
+    }
+
+    try {
+      console.log(`[OneDrive AI] Fetching file content for itemId: ${itemId}, filename: ${filename}`);
+      let downloadResponse: any;
+
+      try {
+        // 1. Obter metadados do arquivo para pegar o link direto de download sem precisar enviar o Header de Authorization para os servidores de CDN de redirecionamento do SharePoint. O que costuma falhar ou travar no Node.
+        console.log(`[OneDrive AI] Solicitando metadados do item ${itemId}...`);
+        const itemRes = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (itemRes.ok) {
+          const itemData = await itemRes.json();
+          const directDownloadUrl = itemData["@microsoft.graph.downloadUrl"];
+          if (directDownloadUrl) {
+            console.log(`[OneDrive AI] Copiando de @microsoft.graph.downloadUrl diretamente.`);
+            downloadResponse = await fetch(directDownloadUrl);
+          } else {
+            throw new Error("Link direto @microsoft.graph.downloadUrl não encontrado nos metadados do item.");
+          }
+        } else {
+          throw new Error(`Erro ao consultar metadados do OneDrive: ${itemRes.statusText}`);
+        }
+      } catch (directDownloadError: any) {
+        console.warn(`[OneDrive AI] Fallback para endpoint clássico de /content devido a: ${directDownloadError.message}`);
+        downloadResponse = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/content`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+
+      if (!downloadResponse.ok) {
+        throw new Error(`Erro ao baixar arquivo do OneDrive: ${downloadResponse.statusText}`);
+      }
+
+      const arrayBuffer = await downloadResponse.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64Data = buffer.toString("base64");
+
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        return res.status(500).json({ error: "GEMINI_API_KEY não configurada no servidor" });
+      }
+
+      const { GoogleGenAI, Type, ThinkingLevel } = await import("@google/genai");
+      const client = new GoogleGenAI({
+        apiKey: geminiApiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const MODEL_NAME = "gemini-3.5-flash";
+
+      if (type === "comprovante") {
+        console.log(`[Backend AI] Extracting OneDrive COMPROVANTE: ${filename}`);
+        const response = await client.models.generateContent({
+          model: MODEL_NAME,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    data: base64Data,
+                    mimeType: "application/pdf",
+                  },
+                },
+                {
+                  text: `Você é um robô extrator de COMPROVANTES DE PAGAMENTO BANCÁRIO.
+                  
+                  ARQUIVO: ${filename || "Comprovante PDF"}
+                  
+                  INSTRUÇÕES:
+                  1. Localize o VALOR PAGO.
+                  2. Localize a DATA DO PAGAMENTO (YYYY-MM-DD) se estiver visível.
+                  3. LOCALIZAR VÍNCULO: Procure por qualquer texto que identifique a guia paga. O código GRCP esperado é "NNNN/PME-XXX/AAAA". Às vezes está no campo de identificação, observação ou no corpo do texto. Se não encontrar de forma nenhuma, retorne string vazia "".
+                  
+                  IMPORTANTE: Se você não encontrar o código GRCP no texto do comprovante mas o NOME DO ARQUIVO contiver algo como "0022-PME-PAT-2026" ou similar, use essa informação para preencher 'identificacaoGrcp'.`,
+                },
+              ],
+            },
+          ],
+          config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                valorPago: { type: Type.NUMBER },
+                dataPagamento: { type: Type.STRING },
+                identificacaoGrcp: { type: Type.STRING },
+              },
+              required: ["valorPago"],
+            },
+          },
+        });
+
+        const text = response.text;
+        console.log("[Backend AI] Result (OneDrive Comprovante):", text);
+        if (text) {
+          const parsed = JSON.parse(text);
+          return res.json(parsed);
+        }
+        throw new Error("Resposta da IA vazia");
+      } else {
+        console.log(`[Backend AI] Extracting OneDrive GUIA: ${filename}`);
+        const response = await client.models.generateContent({
+          model: MODEL_NAME,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    data: base64Data,
+                    mimeType: "application/pdf",
+                  },
+                },
+                {
+                  text: `Você é um robô extrator de dados de GUIA DE RECOLHIMENTO (GRCP) da prefeitura.
+                  
+                  ARQUIVO: ${filename || "Documento PDF"}
+                  
+                  INSTRUÇÕES:
+                  1. Localize o campo de IDENTIFICAÇÃO GRCP. Ele segue o padrão "NNNN/PME-XXX/AAAA" (ex: 0022/PME-PAT/2026, ou 0213/PME-PAT/2026). É CRUCIAL extrair este código exatamente. Se houver variação no número de dígitos antes da barra (ex: 0213 ou 213), traga o código completo exatamente como está impresso. Se não encontrar o código de jeito nenhum, retorne string vazia "".
+                  2. Determine o TIPO de guia. Se o código contiver PAT, é 'patronal'. Se contiver SEG, é 'segurado'. Se não estiver explícito no código mas estiver indicado "PATRONAL" na folha, use 'patronal'.
+                  3. Extraia o VALOR TOTAL de recolhimento da guia. Verifique com muito cuidado: no rodapé ou no bloco de valores haverá campos como "Total Líquido", "SubTotal Arrecadação", ou "Valor Líquido". Procure pela linha final chamada "Total Líquido" ou "SubTotal Arrecadação" ou similar e extraia esse valor numérico (por exemplo, se estiver escrito "3.286,86", extraia o número 3286.86). Não confunda com a Base de Cálculo (ex: 22.044,65).
+                  4. Extraia o VENCIMENTO (YYYY-MM-DD) se encontrar.
+                  5. Extraia o MÊS e ANO de competência (referência) se encontrar.
+                  6. NOME: Descrição da guia ou departamento.
+                  
+                  DICA: O código GRCP geralmente está no topo ou perto do título "Guia de Recolhimento" (ex: "Identificação GRCP: 0213/PME-PAT/2026").`,
+                },
+              ],
+            },
+          ],
+          config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                nome: { type: Type.STRING },
+                valor: { type: Type.NUMBER },
+                vencimento: { type: Type.STRING },
+                mes: { type: Type.INTEGER },
+                ano: { type: Type.INTEGER },
+                tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
+                identificacaoGrcp: { type: Type.STRING },
+              },
+              required: ["valor", "identificacaoGrcp"],
+            },
+          },
+        });
+
+        const text = response.text;
+        console.log("[Backend AI] Result (OneDrive Guia):", text);
+        if (text) {
+          const parsed = JSON.parse(text);
+          return res.json(parsed);
+        }
+        throw new Error("Resposta da IA vazia");
+      }
+    } catch (error: any) {
+      console.error("[Backend AI] Erro na extração do OneDrive:", error);
+      res.status(500).json({ error: error.message || "Erro para extrair arquivo do OneDrive com Gemini" });
+    }
+  });
+
   // API Route: Extract PDF Data using Gemini
   app.post("/api/gemini/extract", async (req, res) => {
     try {
@@ -307,7 +490,7 @@ async function startServer() {
         return res.status(500).json({ error: "GEMINI_API_KEY não configurada no servidor" });
       }
 
-      const { GoogleGenAI, Type } = await import("@google/genai");
+      const { GoogleGenAI, Type, ThinkingLevel } = await import("@google/genai");
       const client = new GoogleGenAI({
         apiKey: geminiApiKey,
         httpOptions: {
@@ -340,8 +523,8 @@ async function startServer() {
                   
                   INSTRUÇÕES:
                   1. Localize o VALOR PAGO.
-                  2. Localize a DATA DO PAGAMENTO (YYYY-MM-DD).
-                  3. LOCALIZAR VÍNCULO: Procure por qualquer texto que identifique a guia paga. O código GRCP esperado é "NNNN/PME-XXX/AAAA". Às vezes está no campo de identificação, observação ou no corpo do texto. 
+                  2. Localize a DATA DO PAGAMENTO (YYYY-MM-DD) se estiver visível.
+                  3. LOCALIZAR VÍNCULO: Procure por qualquer texto que identifique a guia paga. O código GRCP esperado é "NNNN/PME-XXX/AAAA". Às vezes está no campo de identificação, observação ou no corpo do texto. Se não encontrar, retorne string vazia "".
                   
                   IMPORTANTE: Se você não encontrar o código GRCP no texto do comprovante mas o NOME DO ARQUIVO contiver algo como "0022-PME-PAT-2026" ou similar, use essa informação para preencher 'identificacaoGrcp'.`,
                 },
@@ -349,6 +532,7 @@ async function startServer() {
             },
           ],
           config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -357,7 +541,7 @@ async function startServer() {
                 dataPagamento: { type: Type.STRING },
                 identificacaoGrcp: { type: Type.STRING },
               },
-              required: ["valorPago", "dataPagamento", "identificacaoGrcp"],
+              required: ["valorPago"],
             },
           },
         });
@@ -389,19 +573,20 @@ async function startServer() {
                   ARQUIVO: ${filename || "Documento PDF"}
                   
                   INSTRUÇÕES:
-                  1. Localize o campo de IDENTIFICAÇÃO GRCP. Ele segue o padrão "NNNN/PME-XXX/AAAA" (ex: 0022/PME-PAT/2026). É CRUCIAL extrair este código exatamente.
-                  2. Determine o TIPO. Se o código for PAT, é 'patronal'. Se for SEG, é 'segurado'. Se não estiver no código mas o nome do arquivo disser "PATRONAL", use 'patronal'.
-                  3. Extraia o VALOR TOTAL de recolhimento da guia.
-                  4. Extraia o VENCIMENTO (YYYY-MM-DD).
-                  5. Extraia o MÊS e ANO de competência.
+                  1. Localize o campo de IDENTIFICAÇÃO GRCP. Ele segue o padrão "NNNN/PME-XXX/AAAA" (ex: 0022/PME-PAT/2026, ou 0213/PME-PAT/2026). É CRUCIAL extrair este código exatamente. Se houver variação no número de dígitos antes da barra (ex: 0213 ou 213), traga o código completo exatamente como está impresso. Se não encontrar o código de jeito nenhum, retorne string vazia "".
+                  2. Determine o TIPO de guia. Se o código contiver PAT, é 'patronal'. Se contiver SEG, é 'segurado'. Se não estiver explícito no código mas estiver indicado "PATRONAL" na folha, use 'patronal'.
+                  3. Extraia o VALOR TOTAL de recolhimento da guia. Verifique com muito cuidado: no rodapé ou no bloco de valores haverá campos como "Total Líquido", "SubTotal Arrecadação", ou "Valor Líquido". Procure pela linha final chamada "Total Líquido" ou "SubTotal Arrecadação" ou similar e extraia esse valor numérico (por exemplo, se estiver escrito "3.286,86", extraia o número 3286.86). Não confunda com a Base de Cálculo (ex: 22.044,65).
+                  4. Extraia o VENCIMENTO (YYYY-MM-DD) se encontrar.
+                  5. Extraia o MÊS e ANO de competência (referência) se encontrar.
                   6. NOME: Descrição da guia ou departamento.
                   
-                  DICA: O código GRCP geralmente está no topo ou perto do título "Guia de Recolhimento".`,
+                  DICA: O código GRCP geralmente está no topo ou perto do título "Guia de Recolhimento" (ex: "Identificação GRCP: 0213/PME-PAT/2026").`,
                 },
               ],
             },
           ],
           config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -414,7 +599,7 @@ async function startServer() {
                 tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
                 identificacaoGrcp: { type: Type.STRING },
               },
-              required: ["nome", "valor", "vencimento", "mes", "ano", "tipo", "identificacaoGrcp"],
+              required: ["valor", "identificacaoGrcp"],
             },
           },
         });

@@ -296,7 +296,11 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleLogout = () => {
+    sessionStorage.removeItem("trabalho_mes");
+    sessionStorage.removeItem("trabalho_ano");
+    signOut(auth);
+  };
 
   const checkOneDriveStatus = async () => {
     const token = localStorage.getItem('onedrive_token');

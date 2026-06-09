@@ -30,8 +30,22 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
   const [files, setFiles] = useState<FileProcessState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedDeptId, setSelectedDeptId] = useState(departamentoId || '');
-  const [competenciaMes, setCompetenciaMes] = useState(new Date().getMonth() + 1);
-  const [competenciaAno, setCompetenciaAno] = useState(new Date().getFullYear());
+  const [competenciaMes, setCompetenciaMes] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_mes");
+    return saved ? parseInt(saved) : (new Date().getMonth() + 1);
+  });
+  const [competenciaAno, setCompetenciaAno] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_ano");
+    return saved ? parseInt(saved) : new Date().getFullYear();
+  });
+
+  React.useEffect(() => {
+    sessionStorage.setItem("trabalho_mes", competenciaMes.toString());
+  }, [competenciaMes]);
+
+  React.useEffect(() => {
+    sessionStorage.setItem("trabalho_ano", competenciaAno.toString());
+  }, [competenciaAno]);
   const [selectedRegime, setSelectedRegime] = useState<'capitalizado' | 'financeiro'>('capitalizado');
   const [departamentos, setDepartamentos] = useState<{id: string, nome: string}[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -109,7 +123,7 @@ export default function ImportadorGuias({ departamentoId, secretariaId, onComple
                 if (!nextFiles[actualIdx]) return currentFiles;
 
                 const cleanCode = result.identificacaoGrcp 
-                  ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+                  ? result.identificacaoGrcp.replace(/\s+/g, '').toUpperCase() 
                   : "";
 
                 const existingData = (nextFiles[actualIdx].data || {}) as any;

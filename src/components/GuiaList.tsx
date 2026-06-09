@@ -98,8 +98,22 @@ export default function GuiaList({
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mesReferencia, setMesReferencia] = useState(new Date().getMonth() + 1);
-  const [anoFiscal, setAnoFiscal] = useState(new Date().getFullYear());
+  const [mesReferencia, setMesReferencia] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_mes");
+    return saved ? parseInt(saved) : (new Date().getMonth() + 1);
+  });
+  const [anoFiscal, setAnoFiscal] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_ano");
+    return saved ? parseInt(saved) : new Date().getFullYear();
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem("trabalho_mes", mesReferencia.toString());
+  }, [mesReferencia]);
+
+  useEffect(() => {
+    sessionStorage.setItem("trabalho_ano", anoFiscal.toString());
+  }, [anoFiscal]);
   const [activeRegime, setActiveRegime] = useState<
     "capitalizado" | "financeiro"
   >("capitalizado");
@@ -327,7 +341,7 @@ export default function GuiaList({
         if (res.ok) {
           const result = await res.json();
           const cleanCode = result.identificacaoGrcp 
-            ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+            ? result.identificacaoGrcp.replace(/\s+/g, '').toUpperCase() 
             : "";
           const extractedValue = uploadContext.target === "guia" 
             ? (result.valor || 0) 
@@ -1116,6 +1130,7 @@ export default function GuiaList({
 
                   try {
                     setLoading(true);
+                    
                     const dept = departamentos.find(
                       (d) => d.id === oneDrivePickContext.deptId,
                     );
@@ -1134,6 +1149,10 @@ export default function GuiaList({
                       [urlFieldName]: file.webUrl, // Link de visualização do OneDrive
                       updatedAt: serverTimestamp(),
                     };
+
+                    if (oneDrivePickContext.target === "comprovante") {
+                      payload.status = "pago";
+                    }
 
                     if (existingGuia) {
                       await updateDoc(
@@ -1157,8 +1176,8 @@ export default function GuiaList({
                         nome: file.name.split(".")[0],
                         valor: 0,
                         valorPago: 0,
-                        status: "pendente",
-                        identificacaoGrcp: `ONEDRIVE-${Date.now()}`,
+                        status: oneDrivePickContext.target === "comprovante" ? "pago" : "pendente",
+                        identificacaoGrcp: `GRCP-OD-${Date.now()}`,
                         vencimento: new Date(anoFiscal, mesReferencia, 0)
                           .toISOString()
                           .split("T")[0],

@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   FileText, CheckCircle2, TrendingUp, Download, Filter,
-  DollarSign, FileCheck
+  DollarSign, FileCheck, Shield, Users
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -140,6 +140,22 @@ export default function Dashboard() {
   const valorTotalPago = filteredGuias
     .filter(g => g.status === 'pago')
     .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const valorPatronalPago = filteredGuias
+    .filter(g => g.tipo === 'patronal' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const valorSeguradoPago = filteredGuias
+    .filter(g => g.tipo === 'segurado' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const valorPatronalTotal = filteredGuias
+    .filter(g => g.tipo === 'patronal')
+    .reduce((acc, g) => acc + (g.valor || 0), 0);
+
+  const valorSeguradoTotal = filteredGuias
+    .filter(g => g.tipo === 'segurado')
+    .reduce((acc, g) => acc + (g.valor || 0), 0);
 
   // Monthly Evolution dataset for Recharts
   const monthlyData = [
@@ -280,7 +296,7 @@ export default function Dashboard() {
           value={totalComprovantes} 
           icon={<FileCheck className="w-5.5 h-5.5" />} 
           gradient="bg-gradient-to-br from-[#065F46] via-[#10B981] to-[#047857]"
-          borderClass="border border-emerald-400/20 shadow-lg shadow-emerald-500/5 hover:shadow-emerald-500/10"
+          borderClass="border border-emerald-400/10 shadow-lg shadow-emerald-500/5 hover:shadow-emerald-500/10"
           trend={`${totalGuias > 0 ? Math.round((totalComprovantes / totalGuias) * 100) : 0}% guias comprovadas`}
         />
         <StatCard 
@@ -290,6 +306,26 @@ export default function Dashboard() {
           gradient="bg-gradient-to-br from-[#5B21B6] via-[#7C3AED] to-[#6D28D9]"
           borderClass="border border-purple-400/20 shadow-lg shadow-purple-500/5 hover:shadow-purple-500/10"
           trend="Total comprovado em contas"
+        />
+      </div>
+
+      {/* KPI Cards Secundários: Patronal e Segurado */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <StatCard 
+          title="Total Patronal Recebido" 
+          value={formatBRLValue(valorPatronalPago)} 
+          icon={<Shield className="w-5.5 h-5.5" />} 
+          gradient="bg-gradient-to-br from-[#9A3412] via-[#EA580C] to-[#F97316]"
+          borderClass="border border-orange-400/20 shadow-lg shadow-orange-500/5 hover:shadow-orange-500/10"
+          trend={`Previsto: ${formatBRLValue(valorPatronalTotal)}`}
+        />
+        <StatCard 
+          title="Total Segurado Recebido" 
+          value={formatBRLValue(valorSeguradoPago)} 
+          icon={<Users className="w-5.5 h-5.5" />} 
+          gradient="bg-gradient-to-br from-[#0E7490] via-[#0891B2] to-[#06B6D4]"
+          borderClass="border border-cyan-400/20 shadow-lg shadow-cyan-500/5 hover:shadow-cyan-500/10"
+          trend={`Previsto: ${formatBRLValue(valorSeguradoTotal)}`}
         />
       </div>
 

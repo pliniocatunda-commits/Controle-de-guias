@@ -100,8 +100,23 @@ export default function RelatorioConsolidado({
   const [guias, setGuias] = useState<Guia[]>([]);
   const [secretaria, setSecretaria] = useState<Secretaria | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [ano, setAno] = useState(new Date().getFullYear());
+  const [mes, setMes] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_mes");
+    return saved ? parseInt(saved) : (new Date().getMonth() + 1);
+  });
+  const [ano, setAno] = useState(() => {
+    const saved = sessionStorage.getItem("trabalho_ano");
+    return saved ? parseInt(saved) : new Date().getFullYear();
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem("trabalho_mes", mes.toString());
+  }, [mes]);
+
+  useEffect(() => {
+    sessionStorage.setItem("trabalho_ano", ano.toString());
+  }, [ano]);
+
   const [tempValues, setTempValues] = useState<Record<string, string>>({});
   const [activeRegime, setActiveRegime] = useState<
     "capitalizado" | "financeiro"
@@ -123,6 +138,7 @@ export default function RelatorioConsolidado({
   const [odFormGrcp, setOdFormGrcp] = useState<string>("");
   const [linkingOdInProgress, setLinkingOdInProgress] =
     useState<boolean>(false);
+  const [odExtracting, setOdExtracting] = useState<boolean>(false);
   const [linkMode, setLinkMode] = useState<"onedrive" | "local">("onedrive");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -420,7 +436,7 @@ export default function RelatorioConsolidado({
         if (res.ok) {
           const result = await res.json();
           const cleanCode = result.identificacaoGrcp 
-            ? result.identificacaoGrcp.replace(/\s+/g, '').replace(/^0+([0-9])/, '$1') 
+            ? result.identificacaoGrcp.replace(/\s+/g, '').toUpperCase() 
             : "";
           const extractedValue = uploadContext.target === "guia" 
             ? (result.valor || 0) 
@@ -1489,47 +1505,61 @@ export default function RelatorioConsolidado({
                             </button>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
-                            <div>
-                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
-                                Identificação (Código GRCP)
-                              </label>
-                              <input
-                                type="text"
-                                className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                placeholder="Auto-gerado se vazio"
-                                value={odFormGrcp}
-                                onChange={(e) => setOdFormGrcp(e.target.value)}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
-                                {linkContext?.target === "guia"
-                                  ? "Valor da Guia"
-                                  : "Valor Pago (Comprovante)"}
-                              </label>
-                              <div className="relative">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-gray-400 text-xs">
-                                  R$
-                                </span>
-                                <input
-                                  type="text"
-                                  className="w-full bg-white border border-gray-100 rounded-xl pl-10 pr-4 py-3 font-black text-gray-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                  value={odFormValor}
-                                  placeholder="0,00"
-                                  onChange={(e) => {
-                                    setOdFormValor(e.target.value);
-                                  }}
-                                  onBlur={() => {
-                                    setOdFormValor(
-                                      formatBRL(parseBRLToFloat(odFormValor)),
-                                    );
-                                  }}
-                                />
+                          {odExtracting ? (
+                            <div className="flex flex-col items-center justify-center py-10 space-y-4 text-center border-t border-gray-100">
+                              <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                              <div className="space-y-1">
+                                <p className="text-xs font-black text-gray-800 uppercase tracking-tight">
+                                  Extraindo PDF com Inteligência Artificial...
+                                </p>
+                                <p className="text-[10px] text-gray-400 font-bold max-w-xs mx-auto">
+                                  A IA está localizando o código de identificação GRCP e o valor líquido correto do documento. Por favor, aguarde.
+                                </p>
                               </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                                  Identificação (Código GRCP)
+                                </label>
+                                <input
+                                  type="text"
+                                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-900 text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                  placeholder="Auto-gerado se vazio"
+                                  value={odFormGrcp}
+                                  onChange={(e) => setOdFormGrcp(e.target.value)}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                                  {linkContext?.target === "guia"
+                                    ? "Valor da Guia"
+                                    : "Valor Pago (Comprovante)"}
+                                </label>
+                                <div className="relative">
+                                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-gray-400 text-xs">
+                                    R$
+                                  </span>
+                                  <input
+                                    type="text"
+                                    className="w-full bg-white border border-gray-100 rounded-xl pl-10 pr-4 py-3 font-black text-gray-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                    value={odFormValor}
+                                    placeholder="0,00"
+                                    onChange={(e) => {
+                                      setOdFormValor(e.target.value);
+                                    }}
+                                    onBlur={() => {
+                                      setOdFormValor(
+                                        formatBRL(parseBRLToFloat(odFormValor)),
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="flex gap-4 pt-4">
                             <button
@@ -1542,11 +1572,13 @@ export default function RelatorioConsolidado({
                             <button
                               type="button"
                               onClick={handleConfirmOneDriveLink}
-                              disabled={linkingOdInProgress}
+                              disabled={linkingOdInProgress || odExtracting}
                               className="flex-grow py-3 text-center bg-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest text-white hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
                             >
                               {linkingOdInProgress
                                 ? "Vinculando..."
+                                : odExtracting
+                                ? "Lendo documento..."
                                 : "Salvar Vínculo"}
                             </button>
                           </div>
@@ -1564,16 +1596,17 @@ export default function RelatorioConsolidado({
                               )?.onedriveFolderId
                             }
                             onSelectFile={(file) => {
+                              if (file.folder) return;
                               setSelectedOdFile(file);
-                              // Buscar guias existentes
+                              
+                              // Buscar guias existentes para auto-preenchimento rápido direto
                               const existingGuia = guias.find(
                                 (g) =>
                                   g.departamentoId === linkContext.deptId &&
-                                  g.tipo === linkContext.tipo,
+                                  g.tipo === linkContext.tipo &&
+                                  (g.regime || "capitalizado") === activeRegime,
                               );
-                              setOdFormGrcp(
-                                existingGuia?.identificacaoGrcp || "",
-                              );
+                              setOdFormGrcp(existingGuia?.identificacaoGrcp || "");
                               const initialVal =
                                 linkContext.target === "guia"
                                   ? existingGuia?.valor || 0
@@ -1583,6 +1616,19 @@ export default function RelatorioConsolidado({
                               setOdFormValor(formatBRL(initialVal));
                             }}
                           />
+
+                          <div className="mt-4 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLinkContext(null);
+                                setSelectedOdFile(null);
+                              }}
+                              className="px-6 py-3 border border-gray-100 bg-white hover:bg-gray-50 rounded-xl text-[10px] font-black uppercase tracking-widest text-gray-400 transition-colors"
+                            >
+                              Fechar / Cancelar
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
