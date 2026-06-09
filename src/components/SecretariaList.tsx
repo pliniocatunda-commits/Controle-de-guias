@@ -33,7 +33,31 @@ export default function SecretariaList({ onSelect, onSelectDepartments, role }: 
         if (timeA !== timeB) return timeA - timeB;
         return (a.nome || '').localeCompare(b.nome || '');
       });
-      setSecretarias(list);
+
+      // Posiciona "ARTICULAÇÃO POLITICA" logo após "ESPORTE E JUVENTUDE"
+      const normalizedList = [...list];
+      const idxArticulacao = normalizedList.findIndex(sec => {
+        const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return n.includes("articulacao politica");
+      });
+      const idxEsporte = normalizedList.findIndex(sec => {
+        const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return n.includes("esporte") && n.includes("juventude");
+      });
+
+      if (idxArticulacao !== -1 && idxEsporte !== -1) {
+        const articulacaoItem = normalizedList[idxArticulacao];
+        normalizedList.splice(idxArticulacao, 1);
+        
+        const newIdxEsporte = normalizedList.findIndex(sec => {
+          const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          return n.includes("esporte") && n.includes("juventude");
+        });
+        
+        normalizedList.splice(newIdxEsporte + 1, 0, articulacaoItem);
+      }
+
+      setSecretarias(normalizedList);
     } catch (error) {
       console.error(error);
     } finally {

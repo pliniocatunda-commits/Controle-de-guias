@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { 
   FileText, CheckCircle2, TrendingUp, Download, Filter,
-  DollarSign, FileCheck, Shield, Users
+  DollarSign, FileCheck, Shield, Users, AlertTriangle
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -15,9 +16,39 @@ const formatBRLValue = (val: number): string => {
   return `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const formatYAxisTick = (val: number): string => {
+  if (val === 0) return 'R$ 0';
+  if (val >= 1000000) {
+    const formatted = (val / 1000000).toFixed(1).replace('.0', '').replace('.', ',');
+    return `R$ ${formatted}M`;
+  }
+  if (val >= 1000) {
+    const formatted = (val / 1000).toFixed(0);
+    return `R$ ${formatted} mil`;
+  }
+  return `R$ ${val}`;
+};
+
 const normalizeValue = (val: number | string | undefined | null): number => {
   if (val === undefined || val === null) return 0;
-  let num = typeof val === 'string' ? parseFloat(val.replace(/\./g, "").replace(",", ".")) : val;
+  let num: number;
+  if (typeof val === 'string') {
+    // Clean string by removing "R$", space separators, and converting BRL format to standard float representation
+    const clean = val.replace(/R\$\s?/gi, "").trim();
+    if (!clean) return 0;
+    
+    // Check if it uses BRL structure (has dot as thousand sep and comma as decimal separator)
+    if (clean.includes(',') && clean.includes('.')) {
+      num = parseFloat(clean.replace(/\./g, "").replace(",", ".")) || 0;
+    } else if (clean.includes(',')) {
+      num = parseFloat(clean.replace(",", ".")) || 0;
+    } else {
+      num = parseFloat(clean) || 0;
+    }
+  } else {
+    num = val;
+  }
+  
   if (isNaN(num)) return 0;
   
   // If the value is between 0 and 120, it represents thousands (e.g. 3.26 -> 3260, 45.4 -> 45400)
@@ -99,17 +130,17 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  // Filter lists based on selected criteria
+  // Filter lists based on selected criteria with robust type safety
   const filteredGuias = allGuias.filter(g => {
-    const matchMes = selectedMes === 'todos' || g.mes === selectedMes;
-    const matchAno = selectedAno === 'todos' || g.ano === selectedAno;
+    const matchMes = selectedMes === 'todos' || Number(g.mes) === Number(selectedMes);
+    const matchAno = selectedAno === 'todos' || Number(g.ano) === Number(selectedAno);
     const matchRegime = selectedRegime === 'todos' || (g.regime || 'capitalizado') === selectedRegime;
     return matchMes && matchAno && matchRegime;
   });
 
   const filteredComprovantes = allComprovantes.filter(c => {
-    const matchMes = selectedMes === 'todos' || c.mes === selectedMes;
-    const matchAno = selectedAno === 'todos' || c.ano === selectedAno;
+    const matchMes = selectedMes === 'todos' || Number(c.mes) === Number(selectedMes);
+    const matchAno = selectedAno === 'todos' || Number(c.ano) === Number(selectedAno);
     const linkedGuia = c.guiaId ? allGuias.find(g => g.id === c.guiaId) : null;
     const compRegime = c.regime || (linkedGuia && linkedGuia.regime) || 'capitalizado';
     const matchRegime = selectedRegime === 'todos' || compRegime === selectedRegime;
@@ -136,6 +167,13 @@ export default function Dashboard() {
   });
 
   const totalComprovantes = uniqueComps.size;
+
+  // Track discrepancy of documents
+  const guiasPendentes = filteredGuias.filter(g => g.status !== 'pago');
+  const totalPendentes = guiasPendentes.length;
+  const temDivergencia = totalGuias !== totalComprovantes || totalPendentes > 0;
+  const difQuantidade = Math.abs(totalGuias - totalComprovantes);
+  const valorPendenteTotal = guiasPendentes.reduce((acc, g) => acc + (g.valor || 0), 0);
 
   const valorTotalPago = filteredGuias
     .filter(g => g.status === 'pago')
@@ -173,14 +211,19 @@ export default function Dashboard() {
     { name: 'Dez', valor: 0 },
   ];
 
-  // Populate monthly trends from ALL guides matching the active year filter
+  // Populate monthly trends from guides matching active Year, Regime & Month filters
   allGuias.forEach(g => {
-    if (selectedAno !== 'todos' && g.ano !== selectedAno) {
-      return;
-    }
-    if (g.mes >= 1 && g.mes <= 12 && g.status === 'pago') {
-      const val = g.valorPago || g.valor || 0;
-      monthlyData[g.mes - 1].valor += val;
+    const matchAno = selectedAno === 'todos' || Number(g.ano) === Number(selectedAno);
+    const compRegime = g.regime || 'capitalizado';
+    const matchRegime = selectedRegime === 'todos' || compRegime === selectedRegime;
+    const matchMes = selectedMes === 'todos' || Number(g.mes) === Number(selectedMes);
+
+    if (matchAno && matchRegime && matchMes) {
+      const mesNum = Number(g.mes);
+      if (mesNum >= 1 && mesNum <= 12 && g.status === 'pago') {
+        const val = g.valorPago || g.valor || 0;
+        monthlyData[mesNum - 1].valor += val;
+      }
     }
   });
 
@@ -188,6 +231,41 @@ export default function Dashboard() {
     name: m.name,
     valor: parseFloat(m.valor.toFixed(2))
   }));
+
+  // Regime Pie Chart Data (Capitalizado vs Financeiro)
+  const capitalizadoPago = filteredGuias
+    .filter(g => (g.regime || 'capitalizado') === 'capitalizado' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const financeiroPago = filteredGuias
+    .filter(g => (g.regime || 'capitalizado') === 'financeiro' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const regimePieData = [
+    { name: 'Capitalizado', valor: parseFloat(capitalizadoPago.toFixed(2)) },
+    { name: 'Financeiro', valor: parseFloat(financeiroPago.toFixed(2)) }
+  ].filter(item => item.valor > 0);
+
+  const hasRegimeData = regimePieData.length > 0;
+
+  // Tipo Pie Chart Data (Patronal vs Segurado)
+  const patronalPago = filteredGuias
+    .filter(g => g.tipo === 'patronal' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const seguradoPago = filteredGuias
+    .filter(g => g.tipo === 'segurado' && g.status === 'pago')
+    .reduce((acc, g) => acc + (g.valorPago || g.valor || 0), 0);
+
+  const tipoPieData = [
+    { name: 'Patronal', valor: parseFloat(patronalPago.toFixed(2)) },
+    { name: 'Segurado', valor: parseFloat(seguradoPago.toFixed(2)) }
+  ].filter(item => item.valor > 0);
+
+  const hasTipoData = tipoPieData.length > 0;
+
+  const REGIME_COLORS = ['#7C3AED', '#2563EB']; // Violet, Royal Blue
+  const TIPO_COLORS = ['#EA580C', '#0891B2']; // Orange, Cyan
 
   return (
     <div className="p-8 space-y-8 bg-[#f5f5f5] min-h-screen">
@@ -281,6 +359,37 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* Discrepancy Alert Banner */}
+      {temDivergencia && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-rose-50 border border-rose-100 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm"
+        >
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-3 bg-rose-600 text-white rounded-xl shadow-lg flex items-center justify-center animate-pulse">
+              <AlertTriangle className="w-5.5 h-5.5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-rose-950 uppercase tracking-tight">
+                Atenção: Divergência Detectada entre Guias e Comprovantes!
+              </h4>
+              <p className="text-rose-700 text-xs mt-1 leading-relaxed">
+                Neste período, há <strong className="font-extrabold">{totalGuias} guia(s)</strong> cadastradas e somente <strong className="font-extrabold">{totalComprovantes} comprovante(s)</strong> anexados. Diferença de <strong className="font-extrabold">{difQuantidade} guia(s)</strong> pendente(s) de comprovação de depósito.
+              </p>
+            </div>
+          </div>
+          {totalPendentes > 0 && (
+            <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+              <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Valor Pendente Previsto</span>
+              <span className="inline-block bg-rose-100 text-rose-800 text-xs font-black uppercase tracking-tight px-3 py-1.5 rounded-xl border border-rose-200">
+                {formatBRLValue(valorPendenteTotal)}
+              </span>
+            </div>
+          )}
+        </motion.div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard 
@@ -296,8 +405,13 @@ export default function Dashboard() {
           value={totalComprovantes} 
           icon={<FileCheck className="w-5.5 h-5.5" />} 
           gradient="bg-gradient-to-br from-[#065F46] via-[#10B981] to-[#047857]"
-          borderClass="border border-emerald-400/10 shadow-lg shadow-emerald-500/5 hover:shadow-emerald-500/10"
+          borderClass={temDivergencia 
+            ? "border-2 border-rose-500/50 shadow-2xl shadow-rose-500/10" 
+            : "border border-emerald-400/10 shadow-lg shadow-emerald-500/5 hover:shadow-emerald-500/10"
+          }
           trend={`${totalGuias > 0 ? Math.round((totalComprovantes / totalGuias) * 100) : 0}% guias comprovadas`}
+          alertLabel={temDivergencia ? `⚠️ DIVERGÊNCIA: -${difQuantidade} COMS` : undefined}
+          isWarning={temDivergencia}
         />
         <StatCard 
           title="Valor Total Recebido" 
@@ -331,6 +445,147 @@ export default function Dashboard() {
 
       {/* Main Stats Chart */}
       <div className="grid grid-cols-1 gap-8">
+        {/* 2 Gráficos de Pizza: Regime e Tipo (Patronal vs Segurado) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Regime: Financeiro e Capitalizado */}
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between"
+          >
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Divisão por Regime Financeiro</h3>
+              <p className="text-gray-400 text-xs mt-0.5">Distribuição do total de repasses pagos por regime de previdência</p>
+            </div>
+            
+            {hasRegimeData ? (
+              <div className="flex flex-col items-center justify-center mt-6">
+                <div className="h-[240px] w-full relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={regimePieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={85}
+                        paddingAngle={4}
+                        dataKey="valor"
+                      >
+                        {regimePieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.name === 'Capitalizado' ? REGIME_COLORS[0] : REGIME_COLORS[1]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: '1px solid #f1f2f4', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
+                        formatter={(v: any) => [formatBRLValue(v), "Valor Pago"]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Central Text inside donut */}
+                  <div className="absolute inset-x-0 top-[50%] -translate-y-[50%] flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Total Regime</span>
+                    <span className="text-[12px] font-black text-gray-800 tracking-tight">
+                      {formatBRLValue(capitalizadoPago + financeiroPago)}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap justify-center gap-6 mt-4 w-full">
+                  {regimePieData.map((item) => {
+                    const color = item.name === 'Capitalizado' ? REGIME_COLORS[0] : REGIME_COLORS[1];
+                    const total = capitalizadoPago + financeiroPago;
+                    const percentage = total > 0 ? Math.round((item.valor / total) * 100) : 0;
+                    return (
+                      <div key={item.name} className="flex flex-col items-center p-3 rounded-xl bg-gray-50 border border-gray-100 min-w-[120px] transition-all hover:bg-gray-100">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="text-xs font-black text-gray-700">{item.name}</span>
+                        </div>
+                        <span className="text-sm font-black text-gray-900 mt-1">{formatBRLValue(item.valor)}</span>
+                        <span className="text-[10px] font-bold text-gray-400 mt-0.5">{percentage}% do total</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="h-[280px] w-full flex flex-col items-center justify-center text-gray-400 text-sm font-semibold italic">
+                <span>Nenhum pagamento registrado neste período</span>
+              </div>
+            )}
+          </motion.div>
+
+          {/* Patronal e Segurado */}
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between"
+          >
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Divisão por Contribuição</h3>
+              <p className="text-gray-400 text-xs mt-0.5">Proporção dos recursos recebidos entre cotas Patronais e Segurados</p>
+            </div>
+            
+            {hasTipoData ? (
+              <div className="flex flex-col items-center justify-center mt-6">
+                <div className="h-[240px] w-full relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={tipoPieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={85}
+                        paddingAngle={4}
+                        dataKey="valor"
+                      >
+                        {tipoPieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.name === 'Patronal' ? TIPO_COLORS[0] : TIPO_COLORS[1]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: '1px solid #f1f2f4', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
+                        formatter={(v: any) => [formatBRLValue(v), "Valor Pago"]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Central Text inside donut */}
+                  <div className="absolute inset-x-0 top-[50%] -translate-y-[50%] flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Total Origem</span>
+                    <span className="text-[12px] font-black text-gray-800 tracking-tight">
+                      {formatBRLValue(patronalPago + seguradoPago)}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap justify-center gap-6 mt-4 w-full">
+                  {tipoPieData.map((item) => {
+                    const color = item.name === 'Patronal' ? TIPO_COLORS[0] : TIPO_COLORS[1];
+                    const total = patronalPago + seguradoPago;
+                    const percentage = total > 0 ? Math.round((item.valor / total) * 100) : 0;
+                    return (
+                      <div key={item.name} className="flex flex-col items-center p-3 rounded-xl bg-gray-50 border border-gray-100 min-w-[120px] transition-all hover:bg-gray-100">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="text-xs font-black text-gray-700">{item.name}</span>
+                        </div>
+                        <span className="text-sm font-black text-gray-900 mt-1">{formatBRLValue(item.valor)}</span>
+                        <span className="text-[10px] font-bold text-gray-400 mt-0.5">{percentage}% do total</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="h-[280px] w-full flex flex-col items-center justify-center text-gray-400 text-sm font-semibold italic">
+                <span>Nenhum pagamento registrado neste período</span>
+              </div>
+            )}
+          </motion.div>
+        </div>
+
         {/* Chart 2: Monthly Evolution */}
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
@@ -355,9 +610,9 @@ export default function Dashboard() {
                 <YAxis 
                   axisLine={false} 
                   tickLine={false} 
-                  width={95}
-                  tick={{ fontSize: 11, fill: '#8C94A6' }} 
-                  tickFormatter={(v) => formatBRLValue(v)}
+                  width={80}
+                  tick={{ fontSize: 11, fill: '#8C94A6', fontWeight: 500 }} 
+                  tickFormatter={(v) => formatYAxisTick(v)}
                 />
                 <Tooltip 
                   cursor={{ fill: '#fafafa' }}
@@ -380,7 +635,9 @@ function StatCard({
   icon, 
   gradient, 
   borderClass, 
-  trend 
+  trend,
+  alertLabel,
+  isWarning
 }: { 
   title: string; 
   value: string | number; 
@@ -388,6 +645,8 @@ function StatCard({
   gradient: string; 
   borderClass: string; 
   trend: string;
+  alertLabel?: string;
+  isWarning?: boolean;
 }) {
   return (
     <motion.div 
@@ -398,8 +657,12 @@ function StatCard({
         <div className="p-3 rounded-xl bg-white/10 text-white border border-white/20 backdrop-blur-md flex items-center justify-center">
           {icon}
         </div>
-        <span className="text-[10px] font-bold text-white/90 bg-white/10 hover:bg-white/15 transition-colors border border-white/15 px-3 py-1.5 rounded-xl uppercase tracking-wider backdrop-blur-md text-right leading-normal max-w-[240px] break-words">
-          {trend}
+        <span className={`text-[10px] font-bold border px-3 py-1.5 rounded-xl uppercase tracking-wider backdrop-blur-md text-right leading-normal max-w-[240px] break-words transition-all duration-300 ${
+          isWarning 
+            ? 'bg-rose-500 text-white border-rose-400 font-extrabold animate-pulse' 
+            : 'text-white/90 bg-white/10 border-white/15 hover:bg-white/15 border-white/15'
+        }`}>
+          {alertLabel || trend}
         </span>
       </div>
       <div>
