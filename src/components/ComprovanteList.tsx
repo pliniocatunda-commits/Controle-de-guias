@@ -7,6 +7,8 @@ import {
   orderBy,
   limit,
   where,
+  doc,
+  updateDoc,
 } from "firebase/firestore";
 import { Comprovante, Guia } from "../types";
 import {
@@ -24,6 +26,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { onedriveService, extractOneDriveItemId } from "../services/onedriveService";
 // Removido import do Cloudinary pois agora usamos Firebase Storage direto
 
 export default function ComprovanteList() {
@@ -35,12 +38,53 @@ export default function ComprovanteList() {
   const [selectedMes, setSelectedMes] = useState<number | "todos">("todos");
   const [selectedAno, setSelectedAno] = useState<number | "todos">("todos");
 
-  const openDocument = (url: string | undefined) => {
+  const openDocument = async (url: string | undefined, docId?: string) => {
     if (!url) return;
-    const win = window.open(url, "_blank");
+    
+    let targetUrl = url;
+
+    // Se for link do OneDrive tradicional do proprietário, tenta criar um link de visualização seguro de forma transparente
+    const itemId = extractOneDriveItemId(url);
+    if (itemId) {
+      try {
+        console.log("[Segurança] Link clássico do OneDrive detectado. Convertendo para compartilhamento seguro...");
+        const secureUrl = await onedriveService.createShareLink(itemId).catch(() => null);
+        if (secureUrl) {
+          targetUrl = secureUrl;
+          console.log("[Segurança] Link seguro gerado!");
+          
+          if (docId) {
+            // Atualizar no Firestore tanto na coleção 'comprovantes' quanto em local state
+            const compRef = doc(db, "comprovantes", docId);
+            await updateDoc(compRef, { urlComprovante: secureUrl }).catch(e => 
+              console.warn("Não foi possível salvar o link seguro retroativo na coleção comprovantes:", e)
+            );
+            
+            // Também podemos atualizar o correspondente guia se houver c.guiaId
+            const compDoc = comprovantes.find(c => c.id === docId);
+            if (compDoc?.guiaId) {
+              await updateDoc(doc(db, "guias", compDoc.guiaId), { urlComprovante: secureUrl }).catch(() => null);
+            }
+
+            // Atualizar o state local
+            setComprovantes((prev) =>
+              prev.map((c) =>
+                c.id === docId
+                  ? { ...c, urlComprovante: secureUrl, urlOriginal: secureUrl }
+                  : c
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao converter link de proprietário:", err);
+      }
+    }
+
+    const win = window.open(targetUrl, "_blank");
     if (!win) {
       const link = document.createElement("a");
-      link.href = url;
+      link.href = targetUrl;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
@@ -313,16 +357,16 @@ export default function ComprovanteList() {
 
                 <div className="flex items-center gap-3">
                   {comp.urlComprovante || comp.urlOriginal ? (
-                    <a
-                      href={comp.urlComprovante || comp.urlOriginal}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDocument(comp.urlComprovante || comp.urlOriginal, comp.id);
+                      }}
                       className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all shadow-sm bg-white border border-gray-50 flex items-center justify-center cursor-pointer"
                       title="Visualizar Comprovante"
                     >
                       <Eye className="w-5 h-5" />
-                    </a>
+                    </button>
                   ) : (
                     <button
                       onClick={(e) => e.stopPropagation()}

@@ -45,6 +45,7 @@ import RelatorioGuiasModal from "./RelatorioGuiasModal";
 
 import OneDriveExplorer from "./OneDriveExplorer";
 import { Cloud, Link as LinkIcon } from "lucide-react";
+import { onedriveService, extractOneDriveItemId } from "../services/onedriveService";
 
 // Helper functions for BRL currency formatting and parsing
 const parseBRLToFloat = (value: string | number | undefined | null): number => {
@@ -502,7 +503,7 @@ export default function GuiaList({
     );
   };
 
-  const openDocument = (url: string | undefined) => {
+  const openDocument = async (url: string | undefined, docId?: string, isGuia?: boolean) => {
     if (!url || url === "manual") {
       showAlert(
         "Documento não encontrado",
@@ -512,15 +513,48 @@ export default function GuiaList({
       return;
     }
 
+    let targetUrl = url;
+
+    // Se for link do OneDrive tradicional do proprietário, tenta criar um link de visualização seguro de forma transparente
+    const itemId = extractOneDriveItemId(url);
+    if (itemId) {
+      try {
+        console.log("[Segurança] Link clássico do OneDrive detectado. Convertendo para compartilhamento seguro...");
+        const secureUrl = await onedriveService.createShareLink(itemId).catch(() => null);
+        if (secureUrl) {
+          targetUrl = secureUrl;
+          console.log("[Segurança] Link seguro gerado!");
+          
+          if (docId) {
+            const field = isGuia ? "urlGuia" : "urlComprovante";
+            const docRef = doc(db, "guias", docId);
+            await updateDoc(docRef, { [field]: secureUrl }).catch(e => 
+              console.warn("Não foi possível salvar o link seguro retroativo no Banco:", e)
+            );
+            
+            // Atualizar o state local
+            setGuias((prev) =>
+              prev.map((g) =>
+                g.id === docId
+                  ? normalizeGuia({ ...g, [field]: secureUrl })
+                  : g
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao converter link clássico de proprietário:", err);
+      }
+    }
+
     // Preparar URL para visualização
-    const sanitizedUrl = url;
-    console.log("[Visualização] Abrindo URL:", sanitizedUrl);
+    console.log("[Visualização] Abrindo URL:", targetUrl);
 
     // Tentar abrir em nova aba
-    const win = window.open(sanitizedUrl, "_blank");
+    const win = window.open(targetUrl, "_blank");
     if (!win) {
       const link = document.createElement("a");
-      link.href = sanitizedUrl;
+      link.href = targetUrl;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
@@ -804,15 +838,13 @@ export default function GuiaList({
                       <td className="p-2 text-center">
                         {patData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={patData.urlGuia}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(patData.urlGuia, patData.id, true)}
                               className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
                               title="Visualizar"
                             >
                               <FileText className="w-4 h-4" />
-                            </a>
+                            </button>
                             <button
                               onClick={() =>
                                 downloadDocument(
@@ -870,15 +902,13 @@ export default function GuiaList({
                       <td className="p-2 text-center border-r border-gray-200">
                         {patData?.urlComprovante ? (
                           <div className="flex items-center justify-center">
-                            <a
-                              href={patData.urlComprovante}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(patData.urlComprovante, patData.id, false)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
                               title="Visualizar Comprovante"
                             >
                               <CheckCircle className="w-4.5 h-4.5" />
-                            </a>
+                            </button>
                           </div>
                         ) : (
                           role !== "consulta" ? (
@@ -988,15 +1018,13 @@ export default function GuiaList({
                       <td className="p-2 text-center">
                         {segData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={segData.urlGuia}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(segData.urlGuia, segData.id, true)}
                               className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
                               title="Visualizar"
                             >
                               <FileText className="w-4 h-4" />
-                            </a>
+                            </button>
                             <button
                               onClick={() =>
                                 downloadDocument(
@@ -1054,15 +1082,13 @@ export default function GuiaList({
                       <td className="p-2 text-center">
                         {segData?.urlComprovante ? (
                           <div className="flex items-center justify-center">
-                            <a
-                              href={segData.urlComprovante}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(segData.urlComprovante, segData.id, false)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
                               title="Visualizar Comprovante"
                             >
                               <CheckCircle className="w-4.5 h-4.5" />
-                            </a>
+                            </button>
                           </div>
                         ) : (
                           role !== "consulta" ? (
@@ -1180,8 +1206,18 @@ export default function GuiaList({
                       oneDrivePickContext.target === "guia"
                         ? "urlGuia"
                         : "urlComprovante";
+
+                    // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
+                    let fileUrl = file.webUrl;
+                    try {
+                      const shareLink = await onedriveService.createShareLink(file.id);
+                      if (shareLink) fileUrl = shareLink;
+                    } catch (shareErr) {
+                      console.warn("Não foi possível gerar link anônimo seguro, usando clássico:", shareErr);
+                    }
+
                     const payload: any = {
-                      [urlFieldName]: file.webUrl, // Link de visualização do OneDrive
+                      [urlFieldName]: fileUrl, // Link de visualização seguro do OneDrive
                       updatedAt: serverTimestamp(),
                     };
 
@@ -1216,7 +1252,7 @@ export default function GuiaList({
                         vencimento: new Date(anoFiscal, mesReferencia, 0)
                           .toISOString()
                           .split("T")[0],
-                        [urlFieldName]: file.webUrl,
+                        [urlFieldName]: fileUrl,
                         createdAt: serverTimestamp(),
                       };
                       const docRef = await addDoc(

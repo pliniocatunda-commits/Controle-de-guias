@@ -43,7 +43,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import ModalConfirmacao from "./ModalConfirmacao";
-import { onedriveService, DriveItem } from "../services/onedriveService";
+import { onedriveService, DriveItem, extractOneDriveItemId } from "../services/onedriveService";
 import OneDriveExplorer from "./OneDriveExplorer";
 
 // Helper functions for BRL currency formatting and parsing
@@ -279,8 +279,17 @@ export default function RelatorioConsolidado({
       const urlFieldName = target === "guia" ? "urlGuia" : "urlComprovante";
       const valorNum = parseBRLToFloat(odFormValor);
 
+      // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
+      let fileUrl = selectedOdFile.webUrl;
+      try {
+        const shareLink = await onedriveService.createShareLink(selectedOdFile.id);
+        if (shareLink) fileUrl = shareLink;
+      } catch (shareErr) {
+        console.warn("Não foi possível gerar link seguro para OneDrive:", shareErr);
+      }
+
       const payload: any = {
-        [urlFieldName]: selectedOdFile.webUrl,
+        [urlFieldName]: fileUrl,
         identificacaoGrcp:
           odFormGrcp || `ONEDRIVE-${Date.now().toString().slice(-6)}`,
         updatedAt: serverTimestamp(),
@@ -309,7 +318,7 @@ export default function RelatorioConsolidado({
           status: target === "comprovante" ? "pago" : "pendente",
           identificacaoGrcp: odFormGrcp || `GRCP-OD-${Date.now()}`,
           vencimento: new Date(ano, mes, 0).toISOString().split("T")[0],
-          [urlFieldName]: selectedOdFile.webUrl,
+          [urlFieldName]: fileUrl,
           createdAt: serverTimestamp(),
         };
         await addDoc(collection(db, "guias"), newDoc);
@@ -589,7 +598,7 @@ export default function RelatorioConsolidado({
     );
   };
 
-  const openDocument = (url: string | undefined) => {
+  const openDocument = async (url: string | undefined, docId?: string, isGuia?: boolean) => {
     if (!url || url === "manual") {
       showAlert(
         "Documento não encontrado",
@@ -599,15 +608,48 @@ export default function RelatorioConsolidado({
       return;
     }
 
+    let targetUrl = url;
+
+    // Se for link do OneDrive tradicional do proprietário, tenta criar um link de visualização seguro de forma transparente
+    const itemId = extractOneDriveItemId(url);
+    if (itemId) {
+      try {
+        console.log("[Segurança] Link clássico do OneDrive detectado. Convertendo para compartilhamento seguro...");
+        const secureUrl = await onedriveService.createShareLink(itemId).catch(() => null);
+        if (secureUrl) {
+          targetUrl = secureUrl;
+          console.log("[Segurança] Link seguro gerado!");
+          
+          if (docId) {
+            const field = isGuia ? "urlGuia" : "urlComprovante";
+            const docRef = doc(db, "guias", docId);
+            await updateDoc(docRef, { [field]: secureUrl }).catch(e => 
+              console.warn("Não foi possível salvar o link seguro retroativo no Banco:", e)
+            );
+            
+            // Atualizar o state local
+            setGuias((prev) =>
+              prev.map((g) =>
+                g.id === docId
+                  ? { ...g, [field]: secureUrl }
+                  : g
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao converter link clássico de proprietário:", err);
+      }
+    }
+
     // Preparar URL para visualização
-    const sanitizedUrl = url;
-    console.log("[Visualização] Abrindo URL:", sanitizedUrl);
+    console.log("[Visualização] Abrindo URL:", targetUrl);
 
     // Tentar abrir em nova aba
-    const win = window.open(sanitizedUrl, "_blank");
+    const win = window.open(targetUrl, "_blank");
     if (!win) {
       const link = document.createElement("a");
-      link.href = sanitizedUrl;
+      link.href = targetUrl;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
@@ -856,10 +898,8 @@ export default function RelatorioConsolidado({
                       <td className="p-2 text-center">
                         {patData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={patData.urlGuia}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(patData.urlGuia, patData.id, true)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                                 patData.urlGuia?.includes("firebasestorage")
                                   ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
@@ -876,7 +916,7 @@ export default function RelatorioConsolidado({
                               ) : (
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
-                            </a>
+                            </button>
                             <button
                               onClick={() =>
                                 downloadDocument(
@@ -916,10 +956,8 @@ export default function RelatorioConsolidado({
                       <td className="p-2 text-center border-r border-gray-200">
                         {patData?.urlComprovante ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={patData.urlComprovante}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(patData.urlComprovante, patData.id, false)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
                                 patData.urlComprovante?.includes(
                                   "firebasestorage",
@@ -942,7 +980,7 @@ export default function RelatorioConsolidado({
                               ) : (
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
-                            </a>
+                            </button>
                             <button
                               onClick={() => {
                                 askConfirmation(
@@ -1074,10 +1112,8 @@ export default function RelatorioConsolidado({
                       <td className="p-2 text-center">
                         {segData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={segData.urlGuia}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(segData.urlGuia, segData.id, true)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                                 segData.urlGuia?.includes("firebasestorage")
                                   ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
@@ -1094,7 +1130,7 @@ export default function RelatorioConsolidado({
                               ) : (
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
-                            </a>
+                            </button>
                             <button
                               onClick={() =>
                                 downloadDocument(
@@ -1134,10 +1170,8 @@ export default function RelatorioConsolidado({
                       <td className="p-2 text-center">
                         {segData?.urlComprovante ? (
                           <div className="flex items-center justify-center gap-1">
-                            <a
-                              href={segData.urlComprovante}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => openDocument(segData.urlComprovante, segData.id, false)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
                                 segData.urlComprovante?.includes(
                                   "firebasestorage",
@@ -1160,7 +1194,7 @@ export default function RelatorioConsolidado({
                               ) : (
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
-                            </a>
+                            </button>
                             <button
                               onClick={() => {
                                 askConfirmation(

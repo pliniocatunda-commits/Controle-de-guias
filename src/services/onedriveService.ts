@@ -289,5 +289,62 @@ export const onedriveService = {
   // Obtém um link de visualização direta do PDF
   async getPreviewUrl(itemId: string): Promise<string> {
     return `https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/preview`;
+  },
+
+  // Cria um link de compartilhamento público, anônimo e restrito estritamente a este único arquivo (impede ver a pasta em volta)
+  async createShareLink(itemId: string): Promise<string> {
+    const isVercel = window.location.hostname.includes('vercel.app');
+    if (!isVercel) {
+      try {
+        const res = await apiFetch(`/api/onedrive/share-link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.link && data.link.webUrl) {
+            return data.link.webUrl;
+          }
+        }
+      } catch (e) {
+        console.warn("Express backend share-link inacessível. Tentando chamada cliente direta...", e);
+      }
+    }
+
+    // Fallback cliente-side direto para o Graph (se por exemplo rodando em Vercel sem backend)
+    const res = await apiFetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/createLink`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'view',
+        scope: 'anonymous'
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error('Falha ao gerar link seguro de compartilhamento.');
+    }
+    const data = await res.json();
+    if (data && data.link && data.link.webUrl) {
+      return data.link.webUrl;
+    }
+    throw new Error('Retorno do OneDrive não possui um link de visualização.');
   }
 };
+
+/**
+ * Utilitário para extrair o ID do arquivo OneDrive a partir de um link webUrl clássico de proprietário
+ */
+export function extractOneDriveItemId(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    if (!url.includes('onedrive.live.com')) return null;
+    const urlObj = new URL(url);
+    const id = urlObj.searchParams.get('id');
+    return id || null;
+  } catch {
+    const match = url.match(/[?&]id=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+}

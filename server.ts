@@ -294,6 +294,38 @@ async function startServer() {
     }
   });
 
+  // Rota para criar um link de compartilhamento seguro apenas de visualização (evita visualização da pasta pai)
+  app.post("/api/onedrive/share-link", async (req, res) => {
+    const { token } = await getValidToken(req, res);
+    const { itemId } = req.body;
+    if (!token) return res.status(401).json({ error: "Não autenticado no OneDrive" });
+    if (!itemId) return res.status(400).json({ error: "itemId do OneDrive ausente" });
+
+    try {
+      console.log(`[OneDrive Share] Gerando link de visualização seguro para item: ${itemId}`);
+      const response = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/createLink`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          type: "view",
+          scope: "anonymous"
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return res.status(response.status).json(data);
+      }
+      res.json(data);
+    } catch (error: any) {
+      console.error("[OneDrive Share] Erro ao criar link de compartilhamento:", error);
+      res.status(500).json({ error: "Erro ao gerar link de compartilhamento" });
+    }
+  });
+
   // API Route: Extract PDF Data from OneDrive using Gemini
   app.post("/api/onedrive/extract-ai", async (req, res) => {
     const { token } = await getValidToken(req, res);

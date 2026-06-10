@@ -281,8 +281,17 @@ export default function OneDriveManager() {
       const urlFieldName = formTarget === 'guia' ? 'urlGuia' : 'urlComprovante';
       const valorNum = parseFloat(formValor) || 0;
 
+      // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
+      let fileUrl = selectedFile.webUrl;
+      try {
+        const shareLink = await onedriveService.createShareLink(selectedFile.id);
+        if (shareLink) fileUrl = shareLink;
+      } catch (shareErr) {
+        console.warn("Não foi possível gerar link seguro para OneDrive:", shareErr);
+      }
+
       const payload: any = {
-        [urlFieldName]: selectedFile.webUrl,
+        [urlFieldName]: fileUrl,
         updatedAt: serverTimestamp()
       };
 
@@ -314,7 +323,7 @@ export default function OneDriveManager() {
           status: formTarget === 'comprovante' ? 'pago' : 'pendente',
           identificacaoGrcp: formGrcp || `GRCP-OD-${Date.now()}`,
           vencimento: new Date(formAno, formMes, 0).toISOString().split('T')[0],
-          [urlFieldName]: selectedFile.webUrl,
+          [urlFieldName]: fileUrl,
           createdAt: serverTimestamp()
         };
         await addDoc(collection(db, 'guias'), newDoc);
