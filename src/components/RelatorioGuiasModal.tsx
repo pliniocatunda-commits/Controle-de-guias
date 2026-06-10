@@ -393,8 +393,8 @@ export default function RelatorioGuiasModal({
         <!-- Fixed Header -->
         <header>
           <div class="header-content" style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <img src="${logoImg}" style="height: 48px; width: auto; object-fit: contain; flex-shrink: 0;" />
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <img src="${logoImg}" style="height: 62px; max-height: 62px; width: auto; object-fit: contain; flex-shrink: 0; margin-bottom: -2px;" />
               <div class="title-container">
                 <h1>Relatório Consolidado de Guias</h1>
                 <p>SISTEMA GESTIPREV DE GESTÃO PREVIDENCIÁRIA</p>

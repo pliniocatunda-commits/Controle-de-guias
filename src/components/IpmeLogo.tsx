@@ -86,17 +86,16 @@ export default function IpmeLogo({ variant = 'horizontal', className = '', size 
   // If we should load an uploaded image instead
   if (useOfficialImage && !imageError) {
     const defaultImgSrc = imageUrls[0];
-    const horizontalStyle = variant === 'horizontal' ? 'h-11 md:h-14 w-auto' : 'h-24 w-auto';
+    const horizontalStyle = variant === 'horizontal' ? 'h-16 md:h-[84px] py-1 w-auto' : 'h-32 w-auto';
     return (
       <img
         src={defaultImgSrc}
         alt="IPME Logo"
-        className={`${horizontalStyle} ${className} object-contain`}
+        className={`${horizontalStyle} ${className} object-contain transition-all hover:scale-105 duration-200`}
         onError={() => {
           // If the primary image path fails, try the next one or fall back to SVG
           setImageError(true);
         }}
-        referrerPolicy="no-referrer"
       />
     );
   }
