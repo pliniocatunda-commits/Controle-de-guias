@@ -35,11 +35,13 @@ import {
   Plus,
   Minus,
   RotateCcw,
+  FileSpreadsheet,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import ModalConfirmacao from "./ModalConfirmacao";
+import RelatorioGuiasModal from "./RelatorioGuiasModal";
 
 import OneDriveExplorer from "./OneDriveExplorer";
 import { Cloud, Link as LinkIcon } from "lucide-react";
@@ -122,6 +124,8 @@ export default function GuiaList({
     tipo: "patronal" | "segurado";
     target: "guia" | "comprovante";
   } | null>(null);
+
+  const [isRelatorioOpen, setIsRelatorioOpen] = useState(false);
 
   // Modal Control
   const [modalConfig, setModalConfig] = useState<{
@@ -209,6 +213,29 @@ export default function GuiaList({
           if (timeA !== timeB) return timeA - timeB;
           return (a.nome || "").localeCompare(b.nome || "");
         });
+
+        // Posiciona "ARTICULAÇÃO POLITICA" logo após "ESPORTE E JUVENTUDE"
+        const idxArticulacao = secs.findIndex(sec => {
+          const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          return n.includes("articulacao politica");
+        });
+        const idxEsporte = secs.findIndex(sec => {
+          const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          return n.includes("esporte") && n.includes("juventude");
+        });
+
+        if (idxArticulacao !== -1 && idxEsporte !== -1) {
+          const articulacaoItem = secs[idxArticulacao];
+          secs.splice(idxArticulacao, 1);
+          
+          const newIdxEsporte = secs.findIndex(sec => {
+            const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            return n.includes("esporte") && n.includes("juventude");
+          });
+          
+          secs.splice(newIdxEsporte + 1, 0, articulacaoItem);
+        }
+
         setSecretarias(secs);
 
         // Fetch departments
@@ -548,7 +575,15 @@ export default function GuiaList({
             </p>
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => setIsRelatorioOpen(true)}
+              className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest p-4 px-6 h-14 rounded-2xl transition-all shadow-sm active:scale-[0.98] cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>Emitir Relatório</span>
+            </button>
+
             <div className="bg-white p-3 px-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-6">
               <div className="text-right">
                 <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-0.5">
@@ -1331,6 +1366,16 @@ export default function GuiaList({
           </div>
         )}
       </AnimatePresence>
+
+      <RelatorioGuiasModal
+        isOpen={isRelatorioOpen}
+        onClose={() => setIsRelatorioOpen(false)}
+        secretarias={secretarias}
+        departamentos={departamentos}
+        guias={guias}
+        mesReferencia={mesReferencia}
+        anoFiscal={anoFiscal}
+      />
     </div>
   );
 }

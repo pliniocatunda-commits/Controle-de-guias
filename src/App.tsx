@@ -34,6 +34,7 @@ import OneDriveManager from './components/OneDriveManager';
 import OneDriveConnector from './components/OneDriveConnector';
 import UsuarioManager from './components/UsuarioManager';
 import ErrorBoundary from './components/ErrorBoundary';
+import IpmeLogo from './components/IpmeLogo';
 import { motion, AnimatePresence } from 'motion/react';
 import { onedriveService, OneDriveUser } from './services/onedriveService';
 
@@ -656,9 +657,11 @@ export default function App() {
                  <Menu className="w-5 h-5" />
                </button>
              )}
-             <div className="flex flex-col min-w-0">
-               <span className="text-[9px] md:text-xs font-bold text-blue-600 uppercase tracking-wider md:tracking-widest truncate leading-tight">
-                 IPME - Instituto de Previdência dos Servidores Públicos Municipais de Eusébio
+             <IpmeLogo variant="horizontal" className="shrink-0" />
+             <div className="hidden lg:block w-px h-10 bg-gray-200 shrink-0" />
+             <div className="hidden sm:flex flex-col min-w-0">
+               <span className="text-[9px] md:text-xs font-bold text-blue-600 uppercase tracking-widest truncate leading-tight">
+                 Sistema Gestiprev
                </span>
                <h2 className="text-xs sm:text-sm md:text-base font-black text-gray-900 tracking-tight leading-normal uppercase truncate mt-0.5 md:mt-1">
                  Controle de Pagamentos - GRCP
