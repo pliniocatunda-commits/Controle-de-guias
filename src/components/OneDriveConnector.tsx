@@ -105,12 +105,22 @@ export default function OneDriveConnector() {
     setError(null);
     try {
       const url = await onedriveService.getAuthUrl();
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        window.location.href = url;
+        return;
+      }
+
       const width = 600;
       const height = 700;
       const left = window.screenX + (window.outerWidth - width) / 2;
       const top = window.screenY + (window.outerHeight - height) / 2;
       
-      window.open(url, 'onedrive_auth', `width=${width},height=${height},left=${left},top=${top}`);
+      const popup = window.open(url, 'onedrive_auth', `width=${width},height=${height},left=${left},top=${top}`);
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        window.location.href = url;
+      }
     } catch (err: any) {
       setError(err.message || "Não foi possível iniciar a conexão com o OneDrive. Certifique-se de configurar o Client ID no painel abaixo.");
       setShowHelp(true);

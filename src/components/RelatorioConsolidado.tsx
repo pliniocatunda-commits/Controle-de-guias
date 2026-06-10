@@ -215,6 +215,13 @@ export default function RelatorioConsolidado({
   const handleConnectOneDriveInRelatorio = async () => {
     try {
       const url = await onedriveService.getAuthUrl();
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        window.location.href = url;
+        return;
+      }
+
       const width = 600,
         height = 700;
       const left = window.innerWidth / 2 - width / 2;
@@ -225,6 +232,11 @@ export default function RelatorioConsolidado({
         "onedrive_auth",
         `width=${width},height=${height},left=${left},top=${top}`,
       );
+
+      if (!popup || popup.closed || typeof popup.closed === "undefined") {
+        window.location.href = url;
+        return;
+      }
 
       const handleAuthMessage = async (event: MessageEvent) => {
         if (event.data?.type === "ONEDRIVE_AUTH_SUCCESS") {
