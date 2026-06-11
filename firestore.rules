@@ -126,7 +126,11 @@ service cloud.firestore {
         isSecretariaAdmin(get(/databases/$(database)/documents/departamentos/$(existing().departamentoId)).data.secretariaId) ||
         isDepartamentoUser(existing().departamentoId)
       );
-      allow delete: if isSignedIn(); // Relaxed for troubleshooting
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        isSecretariaAdmin(get(/databases/$(database)/documents/departamentos/$(existing().departamentoId)).data.secretariaId) ||
+        isDepartamentoUser(existing().departamentoId)
+      );
     }
 
     match /comprovantes/{compId} {
@@ -140,7 +144,8 @@ service cloud.firestore {
     }
 
     match /config/onedrive {
-      allow read, write: if isSignedIn();
+      allow read: if true; // Mantido para permitir que o Express backend realize a checagem usando REST API sem transporte de JWT do usuário do front
+      allow write: if isAdmin(); // Proteção crítica: impede envenenamento e injeção de credenciais falsas por usuários maliciosos ou anônimos
     }
   }
 }

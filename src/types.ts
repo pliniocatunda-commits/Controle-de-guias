@@ -27,6 +27,8 @@ export interface Guia {
   status: 'pendente' | 'pago' | 'atrasado';
   urlGuia?: string;
   urlComprovante?: string;
+  onedriveGuiaId?: string;
+  onedriveComprovanteId?: string;
   tipo: 'patronal' | 'segurado';
   identificacaoGrcp?: string;
   regime?: string;
@@ -42,6 +44,7 @@ export interface Comprovante {
   dataPagamento: string;
   valorPago: number;
   urlComprovante: string;
+  onedriveComprovanteId?: string;
   urlOriginal?: string;
   regime?: string;
   observacoes?: string;
@@ -57,3 +60,20 @@ export interface Usuario {
   departamentoId?: string;
   createdAt: any;
 }
+
+export interface ExtractedGuia {
+  nome: string;
+  valor: number;
+  vencimento: string;
+  mes: number;
+  ano: number;
+  tipo: 'patronal' | 'segurado';
+  identificacaoGrcp: string;
+}
+
+export interface ExtractedComprovante {
+  valorPago: number;
+  dataPagamento: string;
+  identificacaoGrcp: string;
+}
+

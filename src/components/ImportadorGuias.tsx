@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { db } from '../lib/firebase';
 import { uploadFile } from '../lib/storage';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
-import { extractGuiaData, extractComprovanteData, ExtractedGuia, ExtractedComprovante } from '../services/geminiService';
+import { ExtractedGuia, ExtractedComprovante } from '../types';
 import { 
   FileUp, FileText, CheckCircle, AlertCircle, 
   Loader2, X, UploadCloud

@@ -503,7 +503,7 @@ export default function GuiaList({
     );
   };
 
-  const openDocument = async (url: string | undefined, docId?: string, isGuia?: boolean) => {
+  const openDocument = (url: string | undefined, docId?: string, isGuia?: boolean, onedriveId?: string) => {
     if (!url || url === "manual") {
       showAlert(
         "Documento não encontrado",
@@ -513,44 +513,13 @@ export default function GuiaList({
       return;
     }
 
-    let targetUrl = url;
+    // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
+    const itemId = onedriveId || extractOneDriveItemId(url);
+    const targetUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : url;
 
-    // Se for link do OneDrive tradicional do proprietário, tenta criar um link de visualização seguro de forma transparente
-    const itemId = extractOneDriveItemId(url);
-    if (itemId) {
-      try {
-        console.log("[Segurança] Link clássico do OneDrive detectado. Convertendo para compartilhamento seguro...");
-        const secureUrl = await onedriveService.createShareLink(itemId).catch(() => null);
-        if (secureUrl) {
-          targetUrl = secureUrl;
-          console.log("[Segurança] Link seguro gerado!");
-          
-          if (docId) {
-            const field = isGuia ? "urlGuia" : "urlComprovante";
-            const docRef = doc(db, "guias", docId);
-            await updateDoc(docRef, { [field]: secureUrl }).catch(e => 
-              console.warn("Não foi possível salvar o link seguro retroativo no Banco:", e)
-            );
-            
-            // Atualizar o state local
-            setGuias((prev) =>
-              prev.map((g) =>
-                g.id === docId
-                  ? normalizeGuia({ ...g, [field]: secureUrl })
-                  : g
-              )
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("Erro ao converter link clássico de proprietário:", err);
-      }
-    }
+    console.log("[Visualização] Abrindo URL do documento:", targetUrl);
 
-    // Preparar URL para visualização
-    console.log("[Visualização] Abrindo URL:", targetUrl);
-
-    // Tentar abrir em nova aba
+    // Tentar abrir em nova aba de forma sincronizada e instantânea (evita bloqueadores de popup)
     const win = window.open(targetUrl, "_blank");
     if (!win) {
       const link = document.createElement("a");
@@ -839,7 +808,7 @@ export default function GuiaList({
                         {patData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(patData.urlGuia, patData.id, true)}
+                              onClick={() => openDocument(patData.urlGuia, patData.id, true, patData.onedriveGuiaId)}
                               className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
                               title="Visualizar"
                             >
@@ -903,7 +872,7 @@ export default function GuiaList({
                         {patData?.urlComprovante ? (
                           <div className="flex items-center justify-center">
                             <button
-                              onClick={() => openDocument(patData.urlComprovante, patData.id, false)}
+                              onClick={() => openDocument(patData.urlComprovante, patData.id, false, patData.onedriveComprovanteId)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
                               title="Visualizar Comprovante"
                             >
@@ -1019,7 +988,7 @@ export default function GuiaList({
                         {segData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(segData.urlGuia, segData.id, true)}
+                              onClick={() => openDocument(segData.urlGuia, segData.id, true, segData.onedriveGuiaId)}
                               className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
                               title="Visualizar"
                             >
@@ -1083,7 +1052,7 @@ export default function GuiaList({
                         {segData?.urlComprovante ? (
                           <div className="flex items-center justify-center">
                             <button
-                              onClick={() => openDocument(segData.urlComprovante, segData.id, false)}
+                              onClick={() => openDocument(segData.urlComprovante, segData.id, false, segData.onedriveComprovanteId)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
                               title="Visualizar Comprovante"
                             >
@@ -1207,6 +1176,11 @@ export default function GuiaList({
                         ? "urlGuia"
                         : "urlComprovante";
 
+                    const idFieldName =
+                      oneDrivePickContext.target === "guia"
+                        ? "onedriveGuiaId"
+                        : "onedriveComprovanteId";
+
                     // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
                     let fileUrl = file.webUrl;
                     try {
@@ -1218,6 +1192,7 @@ export default function GuiaList({
 
                     const payload: any = {
                       [urlFieldName]: fileUrl, // Link de visualização seguro do OneDrive
+                      [idFieldName]: file.id, // ID definitivo do item OneDrive
                       updatedAt: serverTimestamp(),
                     };
 
@@ -1253,6 +1228,7 @@ export default function GuiaList({
                           .toISOString()
                           .split("T")[0],
                         [urlFieldName]: fileUrl,
+                        [idFieldName]: file.id, // ID definitivo do item OneDrive
                         createdAt: serverTimestamp(),
                       };
                       const docRef = await addDoc(

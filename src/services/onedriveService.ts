@@ -330,17 +330,30 @@ export const onedriveService = {
       return data.link.webUrl;
     }
     throw new Error('Retorno do OneDrive não possui um link de visualização.');
+  },
+
+  // Retorna a URL de backend que fará o stream seguro, limpo, instantâneo e direto do arquivo do OneDrive
+  getDirectViewUrl(itemId: string): string {
+    const token = localStorage.getItem('onedrive_token') || '';
+    const refreshToken = localStorage.getItem('onedrive_refresh_token') || '';
+    const params = new URLSearchParams({ id: itemId });
+    if (token) params.append('token', token);
+    if (refreshToken) params.append('refresh_token', refreshToken);
+    return `${window.location.origin}/api/onedrive/file-view?${params.toString()}`;
   }
 };
 
 /**
- * Utilitário para extrair o ID do arquivo OneDrive a partir de um link webUrl clássico de proprietário
+ * Utilitário para extrair o ID do arquivo OneDrive a partir de um link webUrl clássico de proprietário ou da nossa API de proxy seguro
  */
 export function extractOneDriveItemId(url: string | undefined): string | null {
   if (!url) return null;
   try {
-    if (!url.includes('onedrive.live.com')) return null;
-    const urlObj = new URL(url);
+    const lowerUrl = url.toLowerCase();
+    if (!lowerUrl.includes('onedrive') && !lowerUrl.includes('live.com') && !lowerUrl.includes('/api/onedrive')) {
+      return null;
+    }
+    const urlObj = new URL(url, window.location.origin);
     const id = urlObj.searchParams.get('id');
     return id || null;
   } catch {

@@ -86,7 +86,7 @@ export default function IpmeLogo({ variant = 'horizontal', className = '', size 
   // If we should load an uploaded image instead
   if (useOfficialImage && !imageError) {
     const defaultImgSrc = imageUrls[0];
-    const horizontalStyle = variant === 'horizontal' ? 'h-16 md:h-[84px] py-1 w-auto' : 'h-32 w-auto';
+    const horizontalStyle = variant === 'horizontal' ? 'h-24 md:h-[112px] py-0.5 w-auto' : 'h-36 w-auto';
     return (
       <img
         src={defaultImgSrc}
@@ -102,16 +102,16 @@ export default function IpmeLogo({ variant = 'horizontal', className = '', size 
 
   // --- Fallback SVG/HTML renderings if image is not uploaded yet ---
   if (variant === 'icon') {
-    return renderSvgIcon(size || 48);
+    return renderSvgIcon(size || 64);
   }
 
   if (variant === 'compact') {
     return (
-      <div className={`flex items-center gap-2 ${className}`}>
-        {renderSvgIcon(size || 38)}
+      <div className={`flex items-center gap-2.5 ${className}`}>
+        {renderSvgIcon(size || 48)}
         <div style={{ fontFamily: 'Georgia, serif' }} className="flex flex-col select-none leading-none">
-          <span className="text-[#19144d] font-black text-sm tracking-tight">IPME</span>
-          <span className="text-[7px] uppercase font-bold text-gray-400">Eusébio / CE</span>
+          <span className="text-[#19144d] font-black text-base tracking-tight">IPME</span>
+          <span className="text-[8px] uppercase font-bold text-gray-400">Eusébio / CE</span>
         </div>
       </div>
     );
@@ -120,13 +120,13 @@ export default function IpmeLogo({ variant = 'horizontal', className = '', size 
   if (variant === 'full') {
     return (
       <div className={`flex flex-col items-center text-center select-none ${className}`}>
-        {renderSvgIcon(size || 72)}
-        <div style={{ fontFamily: 'Georgia, serif' }} className="flex flex-col items-center mt-2 leading-tight">
-          <span className="text-[#19144d] font-black text-2xl tracking-wider mb-1">IPME</span>
-          <span className="text-[10px] md:text-[11px] uppercase font-medium tracking-wide text-slate-800">
+        {renderSvgIcon(size || 96)}
+        <div style={{ fontFamily: 'Georgia, serif' }} className="flex flex-col items-center mt-2.5 leading-tight">
+          <span className="text-[#19144d] font-black text-3xl tracking-wider mb-1.5">IPME</span>
+          <span className="text-[11px] md:text-[12.5px] uppercase font-semibold tracking-wide text-slate-800">
             INSTITUTO DE <span className="font-bold text-[#19144d]">PREVIDÊNCIA</span>
           </span>
-          <span className="text-[10px] md:text-[11px] uppercase font-medium tracking-wide text-slate-800">
+          <span className="text-[11px] md:text-[12.5px] uppercase font-semibold tracking-wide text-slate-800">
             DO MUNICÍPIO DE <span className="font-bold text-[#19144d]">EUSÉBIO</span>
           </span>
         </div>
@@ -136,14 +136,14 @@ export default function IpmeLogo({ variant = 'horizontal', className = '', size 
 
   // Horizontal Layout (ideal for the sticky app header)
   return (
-    <div className={`flex items-center gap-3 md:gap-4 select-none ${className}`}>
-      {renderSvgIcon(size || 52)}
+    <div className={`flex items-center gap-3.5 md:gap-5 select-none ${className}`}>
+      {renderSvgIcon(size || 68)}
       <div style={{ fontFamily: 'Georgia, serif' }} className="flex flex-col justify-center leading-none">
-        <span className="text-[#19144d] font-black text-lg md:text-xl tracking-tight">IPME</span>
-        <span className="text-[8px] md:text-[10px] uppercase font-medium text-slate-700 tracking-wide mt-1.5 whitespace-nowrap">
+        <span className="text-[#19144d] font-black text-2xl md:text-3xl tracking-tight">IPME</span>
+        <span className="text-[10px] md:text-[12px] uppercase font-semibold text-slate-800 tracking-wide mt-2 whitespace-nowrap">
           Instituto de <span className="font-bold text-[#19144d]">Previdência</span>
         </span>
-        <span className="text-[8px] md:text-[10px] uppercase font-medium text-slate-700 tracking-wide mt-0.5 whitespace-nowrap">
+        <span className="text-[10px] md:text-[12px] uppercase font-semibold text-slate-800 tracking-wide mt-0.5 whitespace-nowrap">
           do Município de <span className="font-bold text-[#19144d]">Eusébio</span>
         </span>
       </div>

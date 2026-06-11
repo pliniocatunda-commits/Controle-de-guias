@@ -279,6 +279,7 @@ export default function OneDriveManager() {
       const snap = await getDocs(targetQuery);
       
       const urlFieldName = formTarget === 'guia' ? 'urlGuia' : 'urlComprovante';
+      const idFieldName = formTarget === 'guia' ? 'onedriveGuiaId' : 'onedriveComprovanteId';
       const valorNum = parseFloat(formValor) || 0;
 
       // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
@@ -292,6 +293,7 @@ export default function OneDriveManager() {
 
       const payload: any = {
         [urlFieldName]: fileUrl,
+        [idFieldName]: selectedFile.id,
         updatedAt: serverTimestamp()
       };
 
@@ -324,6 +326,7 @@ export default function OneDriveManager() {
           identificacaoGrcp: formGrcp || `GRCP-OD-${Date.now()}`,
           vencimento: new Date(formAno, formMes, 0).toISOString().split('T')[0],
           [urlFieldName]: fileUrl,
+          [idFieldName]: selectedFile.id,
           createdAt: serverTimestamp()
         };
         await addDoc(collection(db, 'guias'), newDoc);

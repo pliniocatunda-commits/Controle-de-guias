@@ -660,7 +660,7 @@ export default function App() {
       </AnimatePresence>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 md:h-24 bg-white/90 backdrop-blur-md border-b border-gray-100 flex items-center px-4 md:px-8 justify-between sticky top-0 z-30 transition-all">
+        <header className="h-24 md:h-28 bg-white/90 backdrop-blur-md border-b border-gray-100 flex items-center px-4 md:px-8 justify-between sticky top-0 z-30 transition-all">
           <div className="flex items-center gap-3 md:gap-5 flex-1 min-w-0">
              {!isSidebarOpen && (
                <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-gray-100 rounded-lg shrink-0">

@@ -277,6 +277,7 @@ export default function RelatorioConsolidado({
           (g.regime || "capitalizado") === activeRegime,
       );
       const urlFieldName = target === "guia" ? "urlGuia" : "urlComprovante";
+      const idFieldName = target === "guia" ? "onedriveGuiaId" : "onedriveComprovanteId";
       const valorNum = parseBRLToFloat(odFormValor);
 
       // Obter link de compartilhamento seguro para evitar navegação para pastas superiores no OneDrive
@@ -290,6 +291,7 @@ export default function RelatorioConsolidado({
 
       const payload: any = {
         [urlFieldName]: fileUrl,
+        [idFieldName]: selectedOdFile.id, // ID definitivo do item OneDrive
         identificacaoGrcp:
           odFormGrcp || `ONEDRIVE-${Date.now().toString().slice(-6)}`,
         updatedAt: serverTimestamp(),
@@ -319,6 +321,7 @@ export default function RelatorioConsolidado({
           identificacaoGrcp: odFormGrcp || `GRCP-OD-${Date.now()}`,
           vencimento: new Date(ano, mes, 0).toISOString().split("T")[0],
           [urlFieldName]: fileUrl,
+          [idFieldName]: selectedOdFile.id, // ID definitivo do item OneDrive
           createdAt: serverTimestamp(),
         };
         await addDoc(collection(db, "guias"), newDoc);
@@ -598,7 +601,7 @@ export default function RelatorioConsolidado({
     );
   };
 
-  const openDocument = async (url: string | undefined, docId?: string, isGuia?: boolean) => {
+  const openDocument = (url: string | undefined, docId?: string, isGuia?: boolean, onedriveId?: string) => {
     if (!url || url === "manual") {
       showAlert(
         "Documento não encontrado",
@@ -608,44 +611,14 @@ export default function RelatorioConsolidado({
       return;
     }
 
-    let targetUrl = url;
-
-    // Se for link do OneDrive tradicional do proprietário, tenta criar um link de visualização seguro de forma transparente
-    const itemId = extractOneDriveItemId(url);
-    if (itemId) {
-      try {
-        console.log("[Segurança] Link clássico do OneDrive detectado. Convertendo para compartilhamento seguro...");
-        const secureUrl = await onedriveService.createShareLink(itemId).catch(() => null);
-        if (secureUrl) {
-          targetUrl = secureUrl;
-          console.log("[Segurança] Link seguro gerado!");
-          
-          if (docId) {
-            const field = isGuia ? "urlGuia" : "urlComprovante";
-            const docRef = doc(db, "guias", docId);
-            await updateDoc(docRef, { [field]: secureUrl }).catch(e => 
-              console.warn("Não foi possível salvar o link seguro retroativo no Banco:", e)
-            );
-            
-            // Atualizar o state local
-            setGuias((prev) =>
-              prev.map((g) =>
-                g.id === docId
-                  ? { ...g, [field]: secureUrl }
-                  : g
-              )
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("Erro ao converter link clássico de proprietário:", err);
-      }
-    }
+    // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
+    const itemId = onedriveId || extractOneDriveItemId(url);
+    const targetUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : url;
 
     // Preparar URL para visualização
-    console.log("[Visualização] Abrindo URL:", targetUrl);
+    console.log("[Visualização] Abrindo URL do documento:", targetUrl);
 
-    // Tentar abrir em nova aba
+    // Tentar abrir em nova aba de forma sincronizada e instantânea (evita bloqueadores de popup)
     const win = window.open(targetUrl, "_blank");
     if (!win) {
       const link = document.createElement("a");
@@ -899,7 +872,7 @@ export default function RelatorioConsolidado({
                         {patData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(patData.urlGuia, patData.id, true)}
+                              onClick={() => openDocument(patData.urlGuia, patData.id, true, patData.onedriveGuiaId)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                                 patData.urlGuia?.includes("firebasestorage")
                                   ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
@@ -957,7 +930,7 @@ export default function RelatorioConsolidado({
                         {patData?.urlComprovante ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(patData.urlComprovante, patData.id, false)}
+                              onClick={() => openDocument(patData.urlComprovante, patData.id, false, patData.onedriveComprovanteId)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
                                 patData.urlComprovante?.includes(
                                   "firebasestorage",
@@ -1113,7 +1086,7 @@ export default function RelatorioConsolidado({
                         {segData?.urlGuia ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(segData.urlGuia, segData.id, true)}
+                              onClick={() => openDocument(segData.urlGuia, segData.id, true, segData.onedriveGuiaId)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                                 segData.urlGuia?.includes("firebasestorage")
                                   ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
@@ -1171,7 +1144,7 @@ export default function RelatorioConsolidado({
                         {segData?.urlComprovante ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => openDocument(segData.urlComprovante, segData.id, false)}
+                              onClick={() => openDocument(segData.urlComprovante, segData.id, false, segData.onedriveComprovanteId)}
                               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
                                 segData.urlComprovante?.includes(
                                   "firebasestorage",
