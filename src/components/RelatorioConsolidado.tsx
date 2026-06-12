@@ -613,7 +613,8 @@ export default function RelatorioConsolidado({
 
     // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
     const itemId = onedriveId || extractOneDriveItemId(url);
-    const targetUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : url;
+    const directUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : "";
+    const targetUrl = directUrl || url;
 
     // Preparar URL para visualização
     console.log("[Visualização] Abrindo URL do documento:", targetUrl);

@@ -334,6 +334,12 @@ export const onedriveService = {
 
   // Retorna a URL de backend que fará o stream seguro, limpo, instantâneo e direto do arquivo do OneDrive
   getDirectViewUrl(itemId: string): string {
+    const isVercel = window.location.hostname.includes('vercel.app');
+    if (isVercel) {
+      // No Vercel, o backend Express no mesmo domínio não está disponível, então retornamos string vazia
+      // para orientar o componente front-end a abrir o link de compartilhamento nativo seguro (webUrl/shareLink) diretamente.
+      return '';
+    }
     const token = localStorage.getItem('onedrive_token') || '';
     const refreshToken = localStorage.getItem('onedrive_refresh_token') || '';
     const params = new URLSearchParams({ id: itemId });

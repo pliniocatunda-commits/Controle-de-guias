@@ -43,7 +43,8 @@ export default function ComprovanteList() {
     
     // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
     const itemId = onedriveId || extractOneDriveItemId(url);
-    const targetUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : url;
+    const directUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : "";
+    const targetUrl = directUrl || url;
 
     const win = window.open(targetUrl, "_blank");
     if (!win) {
