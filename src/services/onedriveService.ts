@@ -387,6 +387,68 @@ export const onedriveService = {
       console.error("Erro ao obter @microsoft.graph.downloadUrl do OneDrive por itemId:", err);
     }
     return "";
+  },
+
+  // Método unificado para resolver links do OneDrive e retornar uma URL limpa que baixa/abre o arquivo diretamente, sem abrir a interface de pastas do OneDrive.
+  async getDownloadUrl(url: string | undefined, onedriveId?: string): Promise<string> {
+    if (!url || url === 'manual') return '';
+
+    const itemId = onedriveId || extractOneDriveItemId(url);
+    const isVercel = window.location.hostname.includes('vercel.app');
+
+    // 1. Se estivermos locais (ou se houver backend Express), a rota local '/api/onedrive/file-view' faz o stream limpo perfeitamente
+    if (!isVercel && itemId) {
+      const directUrl = this.getDirectViewUrl(itemId);
+      if (directUrl) {
+        return directUrl;
+      }
+    }
+
+    // 2. No Vercel ou se não for possível usar a rota local, vamos obter uma URL de download assinada temporária diretamente via Microsoft Graph
+    const isOneDriveUrl = url.includes('1drv.ms') || url.includes('onedrive') || url.includes('live.com') || url.includes('sharepoint.com');
+
+    if (isOneDriveUrl) {
+      // 2A. Decodificação por Sharing URL (ShareId) do Microsoft Graph. Excelente para links 1drv.ms ou URLs descritivas de compartilhamento.
+      try {
+        const utf8Bytes = new TextEncoder().encode(url);
+        let binString = "";
+        for (let i = 0; i < utf8Bytes.length; i++) {
+          binString += String.fromCharCode(utf8Bytes[i]);
+        }
+        const base64 = btoa(binString);
+        const shareId = 'u!' + base64.replace(/=/g, '').replace(/\//g, '_').replace(/\+/g, '-');
+
+        const shareRes = await apiFetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`);
+        if (shareRes.ok) {
+          const data = await shareRes.json();
+          const downloadUrl = data["@microsoft.graph.downloadUrl"];
+          if (downloadUrl) {
+            console.log("[OneDrive] URL obtida via Share ID no cliente:", downloadUrl);
+            return downloadUrl;
+          }
+        }
+      } catch (err) {
+        console.warn("[OneDrive] Falha ao decodificar Share ID:", err);
+      }
+    }
+
+    // 2B. Fallback com o itemId clássico obtido da URL
+    if (itemId) {
+      try {
+        const res = await apiFetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const downloadUrl = data["@microsoft.graph.downloadUrl"];
+          if (downloadUrl) {
+            return downloadUrl;
+          }
+        }
+      } catch (err) {
+        console.error("[OneDrive] Erro ao obter @microsoft.graph.downloadUrl via itemId:", err);
+      }
+    }
+
+    return url;
   }
 };
 
@@ -397,7 +459,13 @@ export function extractOneDriveItemId(url: string | undefined): string | null {
   if (!url) return null;
   try {
     const lowerUrl = url.toLowerCase();
-    if (!lowerUrl.includes('onedrive') && !lowerUrl.includes('live.com') && !lowerUrl.includes('/api/onedrive')) {
+    if (
+      !lowerUrl.includes('onedrive') &&
+      !lowerUrl.includes('live.com') &&
+      !lowerUrl.includes('1drv.ms') &&
+      !lowerUrl.includes('sharepoint.com') &&
+      !lowerUrl.includes('/api/onedrive')
+    ) {
       return null;
     }
     const urlObj = new URL(url, window.location.origin);

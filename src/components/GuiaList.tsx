@@ -513,25 +513,14 @@ export default function GuiaList({
       return;
     }
 
-    // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
-    const itemId = onedriveId || extractOneDriveItemId(url);
     let targetUrl = url;
-
-    if (itemId) {
-      const directUrl = onedriveService.getDirectViewUrl(itemId);
-      if (directUrl) {
-        targetUrl = directUrl;
-      } else {
-        // No Vercel (onde directUrl é vazia), buscamos dinamicamente o link temporário assinado direto no Microsoft Graph
-        try {
-          const directSignedUrl = await onedriveService.getDirectSignedUrl(itemId, url);
-          if (directSignedUrl) {
-            targetUrl = directSignedUrl;
-          }
-        } catch (e) {
-          console.warn("Falha ao obter link assinado do OneDrive:", e);
-        }
+    try {
+      const resolvedUrl = await onedriveService.getDownloadUrl(url, onedriveId);
+      if (resolvedUrl) {
+        targetUrl = resolvedUrl;
       }
+    } catch (e) {
+      console.warn("Falha ao obter URL limpa de download do OneDrive:", e);
     }
 
     console.log("[Visualização] Abrindo URL do documento:", targetUrl);
