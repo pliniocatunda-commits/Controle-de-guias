@@ -503,7 +503,7 @@ export default function GuiaList({
     );
   };
 
-  const openDocument = (url: string | undefined, docId?: string, isGuia?: boolean, onedriveId?: string) => {
+  const openDocument = async (url: string | undefined, docId?: string, isGuia?: boolean, onedriveId?: string) => {
     if (!url || url === "manual") {
       showAlert(
         "Documento não encontrado",
@@ -515,8 +515,24 @@ export default function GuiaList({
 
     // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
     const itemId = onedriveId || extractOneDriveItemId(url);
-    const directUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : "";
-    const targetUrl = directUrl || url;
+    let targetUrl = url;
+
+    if (itemId) {
+      const directUrl = onedriveService.getDirectViewUrl(itemId);
+      if (directUrl) {
+        targetUrl = directUrl;
+      } else {
+        // No Vercel (onde directUrl é vazia), buscamos dinamicamente o link temporário assinado direto no Microsoft Graph
+        try {
+          const directSignedUrl = await onedriveService.getDirectSignedUrl(itemId);
+          if (directSignedUrl) {
+            targetUrl = directSignedUrl;
+          }
+        } catch (e) {
+          console.warn("Falha ao obter link assinado do OneDrive:", e);
+        }
+      }
+    }
 
     console.log("[Visualização] Abrindo URL do documento:", targetUrl);
 
@@ -695,14 +711,52 @@ export default function GuiaList({
             </thead>
             <tbody className="divide-y divide-gray-200">
               {loading ? (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="py-12 text-center font-bold text-gray-300 animate-pulse uppercase tracking-widest text-[8px]"
-                  >
-                    Sincronizando...
-                  </td>
-                </tr>
+                Array.from({ length: 6 }).map((_, index) => (
+                  <tr key={index} className="animate-pulse">
+                    <td className="py-4 px-6 border-r border-gray-100 max-w-[240px] space-y-2">
+                      <div className="h-3 w-16 bg-gray-200/60 rounded" />
+                      <div className="h-4 w-36 bg-gray-200/80 rounded-md" />
+                    </td>
+                    {/* Patronal */}
+                    <td className="p-3 px-4">
+                      <div className="h-3.5 w-24 bg-gray-200/50 rounded" />
+                    </td>
+                    <td className="p-3 px-4">
+                      <div className="h-3.5 w-16 bg-gray-200/60 rounded" />
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="inline-flex gap-1 justify-center">
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                      </div>
+                    </td>
+                    <td className="p-3 text-center border-r border-gray-100">
+                      <div className="inline-flex gap-1 justify-center">
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                      </div>
+                    </td>
+                    {/* Segurados */}
+                    <td className="p-3 px-4">
+                      <div className="h-3.5 w-24 bg-gray-200/50 rounded" />
+                    </td>
+                    <td className="p-3 px-4">
+                      <div className="h-3.5 w-16 bg-gray-200/60 rounded" />
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="inline-flex gap-1 justify-center">
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                      </div>
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="inline-flex gap-1 justify-center">
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
+                      </div>
+                    </td>
+                  </tr>
+                ))
               ) : (
                 departamentos.map((dept) => {
                   const patData = getGuiaData(dept.id, "patronal");

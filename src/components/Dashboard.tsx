@@ -267,6 +267,88 @@ export default function Dashboard() {
   const REGIME_COLORS = ['#7C3AED', '#2563EB']; // Violet, Royal Blue
   const TIPO_COLORS = ['#EA580C', '#0891B2']; // Orange, Cyan
 
+  if (loading) {
+    return (
+      <div className="p-8 space-y-8 bg-[#f5f5f5] min-h-screen">
+        {/* Shimmer header */}
+        <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-5">
+          <div className="space-y-3">
+            <div className="h-9 w-60 bg-gray-200/80 rounded-2xl animate-pulse" />
+            <div className="h-4 w-96 bg-gray-200/50 rounded-xl animate-pulse" />
+          </div>
+          <div className="h-10 w-48 bg-gray-200/60 rounded-xl animate-pulse" />
+        </header>
+
+        {/* Shimmer Filter row */}
+        <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col lg:flex-row gap-5 items-start lg:items-center justify-between">
+          <div className="flex flex-row flex-wrap sm:flex-nowrap gap-4 items-end w-full lg:w-auto">
+            <div className="space-y-2 flex-1 sm:flex-initial min-w-[140px]">
+              <div className="h-3 w-16 bg-gray-200/50 rounded animate-pulse" />
+              <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
+            </div>
+            <div className="space-y-2 flex-1 sm:flex-initial min-w-[110px]">
+              <div className="h-3 w-12 bg-gray-200/50 rounded animate-pulse" />
+              <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
+            </div>
+            <div className="space-y-2 flex-1 sm:flex-initial min-w-[140px]">
+              <div className="h-3 w-14 bg-gray-200/50 rounded animate-pulse" />
+              <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
+            </div>
+          </div>
+          <div className="h-8 w-72 bg-amber-50/50 rounded-xl border border-amber-100/30 animate-pulse" />
+        </section>
+
+        {/* Shimmer Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="p-6 rounded-2xl bg-white border border-gray-100 shadow-sm h-44 flex flex-col justify-between">
+              <div className="flex justify-between items-start">
+                <div className="w-12 h-12 bg-gray-200/60 rounded-xl animate-pulse" />
+                <div className="w-28 h-7 bg-gray-100/60 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2.5">
+                <div className="w-20 h-3 bg-gray-100/50 rounded animate-pulse" />
+                <div className="w-44 h-8 bg-gray-200/50 rounded-xl animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Shimmer secondary cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[1, 2].map((n) => (
+            <div key={n} className="p-6 rounded-2xl bg-white border border-gray-100 shadow-sm h-40 flex flex-col justify-between">
+              <div className="flex justify-between items-start">
+                <div className="w-12 h-12 bg-gray-200/60 rounded-xl animate-pulse" />
+                <div className="w-28 h-7 bg-gray-100/60 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2.5">
+                <div className="w-24 h-3 bg-gray-100/50 rounded animate-pulse" />
+                <div className="w-56 h-8 bg-gray-200/50 rounded-xl animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Shimmer Chart Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="p-6 bg-white rounded-2xl border border-gray-100 shadow-sm h-[320px] flex flex-col justify-between">
+            <div className="h-6 w-44 bg-gray-200/60 rounded-lg animate-pulse" />
+            <div className="flex-1 flex items-center justify-center">
+              <div className="w-36 h-36 rounded-full border-12 border-gray-100 animate-pulse" />
+            </div>
+          </div>
+          <div className="p-6 bg-white rounded-2xl border border-gray-100 shadow-sm h-[320px] flex flex-col justify-between">
+            <div className="h-6 w-44 bg-gray-200/60 rounded-lg animate-pulse" />
+            <div className="flex-1 flex items-center justify-center">
+              <div className="w-36 h-36 rounded-full border-12 border-gray-100 animate-pulse" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-8 bg-[#f5f5f5] min-h-screen">
       <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">

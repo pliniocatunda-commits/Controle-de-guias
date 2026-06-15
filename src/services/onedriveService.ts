@@ -346,6 +346,20 @@ export const onedriveService = {
     if (token) params.append('token', token);
     if (refreshToken) params.append('refresh_token', refreshToken);
     return `${window.location.origin}/api/onedrive/file-view?${params.toString()}`;
+  },
+
+  // Obtém um link de download direto assinado e temporário do arquivo OneDrive, impecável e seguro (bypassa a interface OneDrive)
+  async getDirectSignedUrl(itemId: string): Promise<string> {
+    try {
+      const res = await apiFetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data["@microsoft.graph.downloadUrl"] || "";
+      }
+    } catch (err) {
+      console.error("Erro ao obter @microsoft.graph.downloadUrl do OneDrive:", err);
+    }
+    return "";
   }
 };
 

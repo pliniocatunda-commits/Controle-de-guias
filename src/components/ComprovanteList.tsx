@@ -38,13 +38,29 @@ export default function ComprovanteList() {
   const [selectedMes, setSelectedMes] = useState<number | "todos">("todos");
   const [selectedAno, setSelectedAno] = useState<number | "todos">("todos");
 
-  const openDocument = (url: string | undefined, docId?: string, onedriveId?: string) => {
+  const openDocument = async (url: string | undefined, docId?: string, onedriveId?: string) => {
     if (!url) return;
     
     // Tenta obter o ID do OneDrive (seja pelo parâmetro direto de onedriveId, seja extraindo do webUrl)
     const itemId = onedriveId || extractOneDriveItemId(url);
-    const directUrl = itemId ? onedriveService.getDirectViewUrl(itemId) : "";
-    const targetUrl = directUrl || url;
+    let targetUrl = url;
+
+    if (itemId) {
+      const directUrl = onedriveService.getDirectViewUrl(itemId);
+      if (directUrl) {
+        targetUrl = directUrl;
+      } else {
+        // No Vercel (onde directUrl é vazia), buscamos dinamicamente o link temporário assinado direto no Microsoft Graph
+        try {
+          const directSignedUrl = await onedriveService.getDirectSignedUrl(itemId);
+          if (directSignedUrl) {
+            targetUrl = directSignedUrl;
+          }
+        } catch (e) {
+          console.warn("Falha ao obter link assinado do OneDrive:", e);
+        }
+      }
+    }
 
     const win = window.open(targetUrl, "_blank");
     if (!win) {
@@ -254,11 +270,23 @@ export default function ComprovanteList() {
 
         <div className="divide-y divide-gray-50">
           {loading ? (
-            <div className="p-20 text-center flex flex-col items-center">
-              <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">
-                Carregando Arquivo...
-              </p>
+            <div className="space-y-0 divide-y divide-gray-100">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="p-6 flex items-center justify-between animate-pulse">
+                  <div className="flex items-center gap-6">
+                    <div className="w-14 h-14 bg-gray-200/60 rounded-2xl shrink-0" />
+                    <div className="space-y-2">
+                      <div className="h-4.5 w-48 bg-gray-200 rounded" />
+                      <div className="h-3 w-80 bg-gray-105 rounded" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="w-9 h-9 bg-gray-250/50 rounded-xl" />
+                    <div className="w-9 h-9 bg-gray-250/50 rounded-xl" />
+                    <div className="w-9 h-9 bg-gray-250/50 rounded-xl" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filtered.length === 0 ? (
             <div className="p-24 text-center">
