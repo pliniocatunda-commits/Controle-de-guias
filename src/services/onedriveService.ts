@@ -349,7 +349,34 @@ export const onedriveService = {
   },
 
   // Obtém um link de download direto assinado e temporário do arquivo OneDrive, impecável e seguro (bypassa a interface OneDrive)
-  async getDirectSignedUrl(itemId: string): Promise<string> {
+  async getDirectSignedUrl(itemId: string, originalUrl?: string): Promise<string> {
+    // 1. Tenta decifrar a URL utilizando a API de Share ID do Microsoft Graph (especificação oficial da Microsoft)
+    // Isso resolve perfeitamente URLs que possuem caminhos descritivos (e.g. /personal/...) em vez de IDs curtos
+    if (originalUrl) {
+      try {
+        const utf8Bytes = new TextEncoder().encode(originalUrl);
+        let binString = "";
+        for (let i = 0; i < utf8Bytes.length; i++) {
+          binString += String.fromCharCode(utf8Bytes[i]);
+        }
+        const base64 = btoa(binString);
+        const shareId = 'u!' + base64.replace(/=/g, '').replace(/\//g, '_').replace(/\+/g, '-');
+
+        const shareRes = await apiFetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`);
+        if (shareRes.ok) {
+          const data = await shareRes.json();
+          const downloadUrl = data["@microsoft.graph.downloadUrl"];
+          if (downloadUrl) {
+            console.log("[OneDrive] URL de download obtida com sucesso via ShareID:", downloadUrl);
+            return downloadUrl;
+          }
+        }
+      } catch (err) {
+        console.warn("[OneDrive] Falha ao tentar obter URL via Share ID:", err);
+      }
+    }
+
+    // 2. Fallback: Tentativa com o itemId na API clássica do Graph (/me/drive/items/{itemId})
     try {
       const res = await apiFetch(`https://graph.microsoft.com/v1.0/me/drive/items/${itemId}`);
       if (res.ok) {
@@ -357,7 +384,7 @@ export const onedriveService = {
         return data["@microsoft.graph.downloadUrl"] || "";
       }
     } catch (err) {
-      console.error("Erro ao obter @microsoft.graph.downloadUrl do OneDrive:", err);
+      console.error("Erro ao obter @microsoft.graph.downloadUrl do OneDrive por itemId:", err);
     }
     return "";
   }

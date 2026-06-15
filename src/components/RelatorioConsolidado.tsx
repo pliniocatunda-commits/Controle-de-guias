@@ -622,7 +622,7 @@ export default function RelatorioConsolidado({
       } else {
         // No Vercel (onde directUrl é vazia), buscamos dinamicamente o link temporário assinado direto no Microsoft Graph
         try {
-          const directSignedUrl = await onedriveService.getDirectSignedUrl(itemId);
+          const directSignedUrl = await onedriveService.getDirectSignedUrl(itemId, url);
           if (directSignedUrl) {
             targetUrl = directSignedUrl;
           }
