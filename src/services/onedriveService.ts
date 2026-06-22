@@ -22,6 +22,7 @@ export interface DriveItem {
 export interface OneDriveConfig {
   clientId: string;
   clientSecret?: string;
+  tenant?: string;
 }
 
 export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
@@ -34,6 +35,7 @@ export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
         return {
           clientId: data.clientId.trim(),
           clientSecret: data.clientSecret ? data.clientSecret.trim() : undefined,
+          tenant: data.tenant ? data.tenant.trim() : 'common'
         };
       }
     }
@@ -45,11 +47,13 @@ export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
   const metaEnv = (import.meta as any).env || {};
   const envId = (metaEnv.VITE_ONEDRIVE_CLIENT_ID || '').trim();
   const envSecret = (metaEnv.VITE_ONEDRIVE_CLIENT_SECRET || '').trim();
+  const envTenant = (metaEnv.VITE_ONEDRIVE_TENANT || 'common').trim();
 
   if (envId) {
     return {
       clientId: envId,
-      clientSecret: envSecret || undefined
+      clientSecret: envSecret || undefined,
+      tenant: envTenant
     };
   }
 
@@ -60,6 +64,7 @@ export async function saveOneDriveConfig(config: OneDriveConfig): Promise<void> 
   await setDoc(doc(db, 'config', 'onedrive'), {
     clientId: config.clientId.trim(),
     clientSecret: config.clientSecret ? config.clientSecret.trim() : '',
+    tenant: config.tenant ? config.tenant.trim() : 'common',
     updatedAt: new Date().toISOString()
   });
 }
@@ -132,7 +137,7 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
           bodyParams.client_secret = config.clientSecret;
         }
 
-        const refreshRes = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+        const refreshRes = await fetch(`https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/token`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(bodyParams),
@@ -205,7 +210,7 @@ export const onedriveService = {
       state: "12345",
     });
 
-    return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
+    return `https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
   },
 
   async getUser(): Promise<OneDriveUser | null> {
@@ -281,7 +286,8 @@ export const onedriveService = {
     }
     const data = await res.json();
     if (data && data.error) {
-      throw new Error(data.error.message || 'Erro do OneDrive ao listar arquivos.');
+      const errorMsg = typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error;
+      throw new Error(errorMsg || 'Erro do OneDrive ao listar arquivos.');
     }
     return data.value || [];
   },

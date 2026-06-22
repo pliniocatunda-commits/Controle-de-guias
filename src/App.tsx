@@ -979,7 +979,7 @@ export default function App() {
                 {/* OneDrive Configuration Integration */}
                 <div className="space-y-4">
                   <h2 className="text-lg font-bold text-gray-900">Conexões & Serviços</h2>
-                  <OneDriveConnector />
+                  <OneDriveConnector role={profile?.role} />
                 </div>
 
                 {/* System Settings Status */}

@@ -39,6 +39,7 @@ async function startServer() {
   let onedriveCache: {
     clientId: string;
     clientSecret: string;
+    tenant: string;
     accessToken: string;
     refreshToken: string;
     loadedAt: number;
@@ -51,8 +52,9 @@ async function startServer() {
       return onedriveCache;
     }
 
-    let clientId = process.env.ONEDRIVE_CLIENT_ID ? process.env.ONEDRIVE_CLIENT_ID.trim() : "";
-    let clientSecret = process.env.ONEDRIVE_CLIENT_SECRET ? process.env.ONEDRIVE_CLIENT_SECRET.trim() : "";
+    let clientId = "";
+    let clientSecret = "";
+    let tenant = "common";
     let accessToken = "";
     let refreshToken = "";
 
@@ -85,12 +87,9 @@ async function startServer() {
       if (fsRes.ok) {
         const fsData = await fsRes.json();
         const fields = fsData.fields || {};
-        if (!clientId) {
-          clientId = fields.clientId?.stringValue?.trim() || "";
-        }
-        if (!clientSecret) {
-          clientSecret = fields.clientSecret?.stringValue?.trim() || "";
-        }
+        clientId = fields.clientId?.stringValue?.trim() || "";
+        clientSecret = fields.clientSecret?.stringValue?.trim() || "";
+        tenant = fields.tenant?.stringValue?.trim() || "common";
         accessToken = fields.accessToken?.stringValue?.trim() || "";
         refreshToken = fields.refreshToken?.stringValue?.trim() || "";
         console.log("[Backend REST] Configuração do OneDrive carregada com sucesso do Firestore.");
@@ -101,9 +100,22 @@ async function startServer() {
       console.error("[Backend REST] Exceção na busca da configuração do OneDrive:", err);
     }
 
+    // Se as credenciais não vierem do Firestore, cai de volta para as variáveis de ambiente
+    if (!clientId) {
+      clientId = process.env.ONEDRIVE_CLIENT_ID ? process.env.ONEDRIVE_CLIENT_ID.trim() : "";
+    }
+    if (!clientSecret) {
+      clientSecret = process.env.ONEDRIVE_CLIENT_SECRET ? process.env.ONEDRIVE_CLIENT_SECRET.trim() : "";
+    }
+    if (!tenant || tenant === "common") {
+      const envTenant = process.env.ONEDRIVE_TENANT ? process.env.ONEDRIVE_TENANT.trim() : "";
+      if (envTenant) tenant = envTenant;
+    }
+
     onedriveCache = {
       clientId,
       clientSecret,
+      tenant,
       accessToken,
       refreshToken,
       loadedAt: Date.now()
@@ -194,7 +206,7 @@ async function startServer() {
     try {
       console.log("[Backend] Renovando token do OneDrive via refresh_token...");
       const config = await getOneDriveConfig();
-      const response = await fetchWithTimeout("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+      const response = await fetchWithTimeout(`https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -255,7 +267,7 @@ async function startServer() {
   // Mantém função compatível para evitar quebra de contratos de rotas legadas
   const getOneDriveCredentials = async () => {
     const config = await getOneDriveConfig();
-    return { clientId: config.clientId, clientSecret: config.clientSecret };
+    return { clientId: config.clientId, clientSecret: config.clientSecret, tenant: config.tenant };
   };
 
   const getRedirectUri = (req: express.Request) => {
@@ -300,6 +312,7 @@ async function startServer() {
         trimmedLength: trimmedSecret.length,
         censored: trimmedSecret ? `${trimmedSecret.substring(0, 6)}...${trimmedSecret.substring(trimmedSecret.length - 4)}` : "Não configurado"
       },
+      tenant: creds.tenant || "common",
       appUrlFromEnv: appUrl || "Não configurado",
       detectedHost: host,
       detectedProtocol: proto,
@@ -342,7 +355,7 @@ async function startServer() {
       state: "12345", // Em produção use algo dinâmico
     });
 
-    const authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
+    const authUrl = `https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
     res.json({ url: authUrl });
   });
 
@@ -357,7 +370,7 @@ async function startServer() {
     try {
       const creds = await getOneDriveCredentials();
       const currentRedirectUri = getRedirectUri(req);
-      const response = await fetchWithTimeout("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+      const response = await fetchWithTimeout(`https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -463,7 +476,7 @@ async function startServer() {
       try {
         console.log("Renovando token do OneDrive usando refresh token...");
         const creds = await getOneDriveCredentials();
-        const response = await fetchWithTimeout("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+        const response = await fetchWithTimeout(`https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/token`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
@@ -530,7 +543,8 @@ async function startServer() {
       }, 5000);
       const data = await response.json();
       if (!response.ok) {
-        return res.status(response.status).json(data);
+        const errorMsg = data.error?.message || data.error || "Erro ao buscar dados do usuário no OneDrive";
+        return res.status(response.status).json({ error: errorMsg });
       }
       res.json(data);
     } catch (error) {
@@ -554,7 +568,8 @@ async function startServer() {
       }, 8000);
       const data = await response.json();
       if (!response.ok) {
-        return res.status(response.status).json(data);
+        const errorMsg = data.error?.message || data.error || "Erro ao listar arquivos do OneDrive";
+        return res.status(response.status).json({ error: errorMsg });
       }
       res.json(data);
     } catch (error) {
@@ -585,7 +600,8 @@ async function startServer() {
 
       const data = await response.json();
       if (!response.ok) {
-        return res.status(response.status).json(data);
+        const errorMsg = data.error?.message || data.error || "Erro ao gerar link de compartilhamento no OneDrive";
+        return res.status(response.status).json({ error: errorMsg });
       }
       res.json(data);
     } catch (error: any) {

@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { onedriveService, OneDriveUser } from '../services/onedriveService';
 import { Cloud, Check, Loader2, AlertCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink, Copy, CheckCircle2 } from 'lucide-react';
 
-export default function OneDriveConnector() {
+interface Props {
+  role?: string;
+}
+
+export default function OneDriveConnector({ role }: Props) {
   const [user, setUser] = useState<OneDriveUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +18,7 @@ export default function OneDriveConnector() {
   // Estados para configuração do OneDrive salvas no Firestore para Vercel
   const [configClientId, setConfigClientId] = useState('');
   const [configClientSecret, setConfigClientSecret] = useState('');
+  const [configTenant, setConfigTenant] = useState('common');
   const [savingConfig, setSavingConfig] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -51,6 +56,7 @@ export default function OneDriveConnector() {
       if (config) {
         setConfigClientId(config.clientId || '');
         setConfigClientSecret(config.clientSecret || '');
+        setConfigTenant(config.tenant || 'common');
       }
     } catch (e) {
       console.error("Erro ao carregar configurações do OneDrive do Firestore:", e);
@@ -65,7 +71,8 @@ export default function OneDriveConnector() {
       const { saveOneDriveConfig } = await import('../services/onedriveService');
       await saveOneDriveConfig({
         clientId: configClientId,
-        clientSecret: configClientSecret
+        clientSecret: configClientSecret,
+        tenant: configTenant
       });
       setSaveSuccess(true);
       await loadDiagnostics();
@@ -176,13 +183,20 @@ export default function OneDriveConnector() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowHelp(!showHelp)}
-            className="p-2 text-gray-400 hover:text-black hover:bg-gray-50 rounded-lg transition-colors"
-            title="Ajuda e Instruções de Configuração"
-          >
-            <HelpCircle size={18} />
-          </button>
+          {role === 'master' && (
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              className={`p-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold ${
+                showHelp 
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700' 
+                  : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+              title="Parametrização e Configurações de Integração do OneDrive"
+            >
+              <HelpCircle size={15} />
+              <span>{showHelp ? "Ocultar Painel" : "Parametrização OneDrive"}</span>
+            </button>
+          )}
           
           {user ? (
             <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-xs font-bold">
@@ -254,6 +268,16 @@ export default function OneDriveConnector() {
                 </div>
 
                 <div>
+                  <span className="text-gray-400">ONEDRIVE_TENANT:</span>{" "}
+                  <span className="text-emerald-400 font-bold">
+                    {diagnostics.tenant || "common"}
+                  </span>
+                  <div className="pl-3 text-[10px] text-gray-400 mt-0.5">
+                    • Status: {diagnostics.tenant === "common" ? "ℹ️ Padrão Comum (Multilocatário e pessoal)" : `✅ Customizado (${diagnostics.tenant})`}
+                  </div>
+                </div>
+
+                <div>
                   <span className="text-gray-400">APP_URL (Configurado):</span>{" "}
                   <span className="text-indigo-300">{diagnostics.appUrlFromEnv}</span>
                 </div>
@@ -313,6 +337,20 @@ export default function OneDriveConnector() {
                   placeholder="Insira o valor do segredo para sincronização híbrida"
                   className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
                 />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-slate-700">ID do Tenant (Azure Directory Tenant ID):</label>
+                <input 
+                  type="text" 
+                  value={configTenant}
+                  onChange={(e) => setConfigTenant(e.target.value)}
+                  placeholder="Ex: common, organizations, ou o ID do diretório (Guid)"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500"
+                  required
+                />
+                <p className="text-[10px] text-slate-500 mt-0.5 leading-normal">
+                  Utilize <strong>common</strong> para contas multilocatárias/pessoais (padrão), ou insira o ID específico do diretório (UUID) para contas corporativas restritas de sua instituição.
+                </p>
               </div>
               <div className="flex items-center justify-between pt-1">
                 <button

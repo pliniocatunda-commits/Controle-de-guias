@@ -137,9 +137,16 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidComprovante(incoming()) && (
         isAdmin() ||
-        isDepartamentoUser(get(/databases/$(database)/documents/guias/$(incoming().guiaId)).data.departamentoId)
+        (incoming().keys().hasAll(['guiaId']) && incoming().guiaId != null && incoming().guiaId != "" &&
+         isDepartamentoUser(get(/databases/$(database)/documents/guias/$(incoming().guiaId)).data.departamentoId)) ||
+        (incoming().keys().hasAll(['secretariaId']) && incoming().secretariaId != null &&
+         isSecretariaAdmin(incoming().secretariaId))
       );
-      allow update: if isSignedIn() && isValidComprovante(incoming()) && isAdmin();
+      allow update: if isSignedIn() && isValidComprovante(incoming()) && (
+        isAdmin() ||
+        (incoming().keys().hasAll(['secretariaId']) && incoming().secretariaId != null &&
+         isSecretariaAdmin(incoming().secretariaId))
+      );
       allow delete: if isAdmin();
     }
 
