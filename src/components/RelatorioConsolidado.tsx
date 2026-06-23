@@ -90,11 +90,13 @@ const handleBRLChange = (valStr: string): string => {
 interface ConsolidatedTableProps {
   secretariaId: string;
   onBack: () => void;
+  role?: string;
 }
 
 export default function RelatorioConsolidado({
   secretariaId,
   onBack,
+  role,
 }: ConsolidatedTableProps) {
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [guias, setGuias] = useState<Guia[]>([]);
@@ -391,6 +393,7 @@ export default function RelatorioConsolidado({
     field: string,
     value: any,
   ) => {
+    if (role !== "master" && role !== "admin") return;
     try {
       await updateDoc(doc(db, "guias", guiaId), { [field]: value });
       setGuias((prev) =>
@@ -576,6 +579,7 @@ export default function RelatorioConsolidado({
   };
 
   const handleDeleteGuia = (guiaId: string) => {
+    if (role !== "master" && role !== "admin") return;
     askConfirmation(
       "Remover Registro",
       "Deseja realmente remover este arquivo e seus dados?",
@@ -849,7 +853,8 @@ export default function RelatorioConsolidado({
                           {patData ? (
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
+                              disabled={role !== "master" && role !== "admin"}
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={patData.identificacaoGrcp || ""}
                               onChange={(e) =>
                                 handleInlineUpdate(
@@ -874,7 +879,8 @@ export default function RelatorioConsolidado({
                             </span>
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              disabled={role !== "master" && role !== "admin"}
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[patData.id] !== undefined
                                   ? tempValues[patData.id]
@@ -945,28 +951,34 @@ export default function RelatorioConsolidado({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteGuia(patData.id)}
-                              className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                              title="Deletar Lançamento"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                onClick={() => handleDeleteGuia(patData.id)}
+                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
+                                title="Deletar Lançamento"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              setLinkContext({
-                                deptId: dept.id,
-                                deptNome: dept.nome,
-                                tipo: "patronal",
-                                target: "guia",
-                              })
-                            }
-                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                          (role === "master" || role === "admin") ? (
+                            <button
+                              onClick={() =>
+                                setLinkContext({
+                                  deptId: dept.id,
+                                  deptNome: dept.nome,
+                                  tipo: "patronal",
+                                  target: "guia",
+                                })
+                              }
+                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                          )
                         )}
                       </td>
                       <td className="p-2 text-center border-r border-gray-200">
@@ -997,63 +1009,69 @@ export default function RelatorioConsolidado({
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
                             </button>
-                            <button
-                              onClick={() => {
-                                askConfirmation(
-                                  "Remover Comprovante",
-                                  "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                  "danger",
-                                  async () => {
-                                    try {
-                                      await updateDoc(
-                                        doc(db, "guias", patData.id),
-                                        {
-                                          urlComprovante: null,
-                                          status: "pendente",
-                                        },
-                                      );
-                                      setGuias((prev) =>
-                                        prev.map((g) =>
-                                          g.id === patData.id
-                                            ? {
-                                                ...g,
-                                                urlComprovante: null,
-                                                status: "pendente",
-                                              }
-                                            : g,
-                                        ),
-                                      );
-                                      showAlert(
-                                        "Desvinculado",
-                                        "Arquivo do comprovante de pagamento desassociado.",
-                                        "success",
-                                      );
-                                    } catch (err) {
-                                      console.error(err);
-                                    }
-                                  },
-                                );
-                              }}
-                              className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                              title="Desvincular Comprovante"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                onClick={() => {
+                                  askConfirmation(
+                                    "Remover Comprovante",
+                                    "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                    "danger",
+                                    async () => {
+                                      try {
+                                        await updateDoc(
+                                          doc(db, "guias", patData.id),
+                                          {
+                                            urlComprovante: null,
+                                            status: "pendente",
+                                          },
+                                        );
+                                        setGuias((prev) =>
+                                          prev.map((g) =>
+                                            g.id === patData.id
+                                              ? {
+                                                  ...g,
+                                                  urlComprovante: null,
+                                                  status: "pendente",
+                                                }
+                                              : g,
+                                          ),
+                                        );
+                                        showAlert(
+                                          "Desvinculado",
+                                          "Arquivo do comprovante de pagamento desassociado.",
+                                          "success",
+                                        );
+                                      } catch (err) {
+                                        console.error(err);
+                                      }
+                                    },
+                                  );
+                                }}
+                                className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
+                                title="Desvincular Comprovante"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              setLinkContext({
-                                deptId: dept.id,
-                                deptNome: dept.nome,
-                                tipo: "patronal",
-                                target: "comprovante",
-                              })
-                            }
-                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                          (role === "master" || role === "admin") ? (
+                            <button
+                              onClick={() =>
+                                setLinkContext({
+                                  deptId: dept.id,
+                                  deptNome: dept.nome,
+                                  tipo: "patronal",
+                                  target: "comprovante",
+                                })
+                              }
+                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">—</span>
+                          )
                         )}
                       </td>
 
@@ -1063,7 +1081,8 @@ export default function RelatorioConsolidado({
                           {segData ? (
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight"
+                              disabled={role !== "master" && role !== "admin"}
+                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={segData.identificacaoGrcp || ""}
                               onChange={(e) =>
                                 handleInlineUpdate(
@@ -1088,7 +1107,8 @@ export default function RelatorioConsolidado({
                             </span>
                             <input
                               type="text"
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px]"
+                              disabled={role !== "master" && role !== "admin"}
+                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[segData.id] !== undefined
                                   ? tempValues[segData.id]
@@ -1159,28 +1179,34 @@ export default function RelatorioConsolidado({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteGuia(segData.id)}
-                              className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                              title="Deletar Lançamento"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                onClick={() => handleDeleteGuia(segData.id)}
+                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
+                                title="Deletar Lançamento"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              setLinkContext({
-                                deptId: dept.id,
-                                deptNome: dept.nome,
-                                tipo: "segurado",
-                                target: "guia",
-                              })
-                            }
-                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                          (role === "master" || role === "admin") ? (
+                            <button
+                              onClick={() =>
+                                setLinkContext({
+                                  deptId: dept.id,
+                                  deptNome: dept.nome,
+                                  tipo: "segurado",
+                                  target: "guia",
+                                })
+                              }
+                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                          )
                         )}
                       </td>
                       <td className="p-2 text-center">
@@ -1211,63 +1237,69 @@ export default function RelatorioConsolidado({
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
                             </button>
-                            <button
-                              onClick={() => {
-                                askConfirmation(
-                                  "Remover Comprovante",
-                                  "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                  "danger",
-                                  async () => {
-                                    try {
-                                      await updateDoc(
-                                        doc(db, "guias", segData.id),
-                                        {
-                                          urlComprovante: null,
-                                          status: "pendente",
-                                        },
-                                      );
-                                      setGuias((prev) =>
-                                        prev.map((g) =>
-                                          g.id === segData.id
-                                            ? {
-                                                ...g,
-                                                urlComprovante: null,
-                                                status: "pendente",
-                                              }
-                                            : g,
-                                        ),
-                                      );
-                                      showAlert(
-                                        "Desvinculado",
-                                        "Arquivo do comprovante de pagamento desassociado.",
-                                        "success",
-                                      );
-                                    } catch (err) {
-                                      console.error(err);
-                                    }
-                                  },
-                                );
-                              }}
-                              className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                              title="Desvincular Comprovante"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                onClick={() => {
+                                  askConfirmation(
+                                    "Remover Comprovante",
+                                    "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                    "danger",
+                                    async () => {
+                                      try {
+                                        await updateDoc(
+                                          doc(db, "guias", segData.id),
+                                          {
+                                            urlComprovante: null,
+                                            status: "pendente",
+                                          },
+                                        );
+                                        setGuias((prev) =>
+                                          prev.map((g) =>
+                                            g.id === segData.id
+                                              ? {
+                                                  ...g,
+                                                  urlComprovante: null,
+                                                  status: "pendente",
+                                                }
+                                              : g,
+                                          ),
+                                        );
+                                        showAlert(
+                                          "Desvinculado",
+                                          "Arquivo do comprovante de pagamento desassociado.",
+                                          "success",
+                                        );
+                                      } catch (err) {
+                                        console.error(err);
+                                      }
+                                    },
+                                  );
+                                }}
+                                className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
+                                title="Desvincular Comprovante"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ) : (
-                          <button
-                            onClick={() =>
-                              setLinkContext({
-                                deptId: dept.id,
-                                deptNome: dept.nome,
-                                tipo: "segurado",
-                                target: "comprovante",
-                              })
-                            }
-                            className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                          (role === "master" || role === "admin") ? (
+                            <button
+                              onClick={() =>
+                                setLinkContext({
+                                  deptId: dept.id,
+                                  deptNome: dept.nome,
+                                  tipo: "segurado",
+                                  target: "comprovante",
+                                })
+                              }
+                              className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all mx-auto border border-dashed border-gray-200"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 select-none">—</span>
+                          )
                         )}
                       </td>
                     </tr>

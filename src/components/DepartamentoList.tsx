@@ -248,7 +248,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
             <Layers className="w-4 h-4" /> Gerenciamento de Departamentos
           </p>
         </div>
-        {role !== 'consulta' && (
+        {(role === 'master' || role === 'admin') && (
           <div className="flex gap-3">
             <button 
               onClick={() => setShowPayModal(true)}
@@ -303,7 +303,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  {role !== 'consulta' && (
+                  {(role === 'master' || role === 'admin') && (
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={(e) => { e.stopPropagation(); setEditingDept(dept); }}

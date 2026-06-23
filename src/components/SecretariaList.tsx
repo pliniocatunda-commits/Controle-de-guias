@@ -120,7 +120,7 @@ export default function SecretariaList({ onSelect, onSelectDepartments, role }: 
           <h1 className="text-2xl font-bold">Secretarias</h1>
           <p className="text-gray-500">Gestão das unidades administrativas centrais</p>
         </div>
-        {role !== 'consulta' && (
+        {(role === 'master' || role === 'admin') && (
           <button 
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/10 cursor-pointer text-sm font-semibold"
@@ -173,7 +173,7 @@ export default function SecretariaList({ onSelect, onSelectDepartments, role }: 
                       <Building2 className="w-3.5 h-3.5 text-gray-500" /> Departamentos
                     </button>
                   )}
-                  {role !== 'consulta' && (
+                  {(role === 'master' || role === 'admin') && (
                     <>
                       <button 
                         onClick={(e) => { e.stopPropagation(); setEditingSec(sec); }}

@@ -299,7 +299,7 @@ export default function GuiaList({
     field: string,
     value: any,
   ) => {
-    if (role === "consulta") return;
+    if (role !== "master" && role !== "admin") return;
     try {
       await updateDoc(doc(db, "guias", guiaId), { [field]: value });
       setGuias((prev) =>
@@ -317,6 +317,7 @@ export default function GuiaList({
     tipo: "patronal" | "segurado",
     target: "guia" | "comprovante",
   ) => {
+    if (role !== "master" && role !== "admin") return;
     setUploadContext({ deptId, tipo, target });
     fileInputRef.current?.click();
   };
@@ -487,6 +488,7 @@ export default function GuiaList({
   };
 
   const handleDeleteGuia = (guiaId: string) => {
+    if (role !== "master" && role !== "admin") return;
     askConfirmation(
       "Remover Registro",
       "Deseja realmente remover este arquivo e seus dados?",
@@ -784,7 +786,7 @@ export default function GuiaList({
                           {patData ? (
                             <input
                               type="text"
-                              disabled={role === "consulta"}
+                              disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={patData.identificacaoGrcp || ""}
                               onChange={(e) =>
@@ -810,7 +812,7 @@ export default function GuiaList({
                             </span>
                             <input
                               type="text"
-                              disabled={role === "consulta"}
+                              disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[patData.id] !== undefined
@@ -870,7 +872,7 @@ export default function GuiaList({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            {role !== "consulta" && (
+                            {(role === "master" || role === "admin") && (
                               <button
                                 onClick={() => handleDeleteGuia(patData.id)}
                                 className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
@@ -880,7 +882,7 @@ export default function GuiaList({
                             )}
                           </div>
                         ) : (
-                          role !== "consulta" ? (
+                          (role === "master" || role === "admin") ? (
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() =>
@@ -924,7 +926,7 @@ export default function GuiaList({
                             </button>
                           </div>
                         ) : (
-                          role !== "consulta" ? (
+                          (role === "master" || role === "admin") ? (
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() =>
@@ -964,7 +966,7 @@ export default function GuiaList({
                           {segData ? (
                             <input
                               type="text"
-                              disabled={role === "consulta"}
+                              disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
                               value={segData.identificacaoGrcp || ""}
                               onChange={(e) =>
@@ -990,7 +992,7 @@ export default function GuiaList({
                             </span>
                             <input
                               type="text"
-                              disabled={role === "consulta"}
+                              disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
                               value={
                                 tempValues[segData.id] !== undefined
@@ -1050,7 +1052,7 @@ export default function GuiaList({
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            {role !== "consulta" && (
+                            {(role === "master" || role === "admin") && (
                               <button
                                 onClick={() => handleDeleteGuia(segData.id)}
                                 className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
@@ -1060,7 +1062,7 @@ export default function GuiaList({
                             )}
                           </div>
                         ) : (
-                          role !== "consulta" ? (
+                          (role === "master" || role === "admin") ? (
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() =>
@@ -1104,7 +1106,7 @@ export default function GuiaList({
                             </button>
                           </div>
                         ) : (
-                          role !== "consulta" ? (
+                          (role === "master" || role === "admin") ? (
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() =>

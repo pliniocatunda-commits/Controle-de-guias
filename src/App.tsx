@@ -211,7 +211,7 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
-      console.error("Erro no login:", error);
+      console.warn("Aviso ou erro no login:", error);
       const currentDomain = window.location.hostname;
       if (error.code === 'auth/unauthorized-domain') {
         alert(`O domínio atual (${currentDomain}) não está autorizado no Firebase Console.\n\nPor favor, certifique-se de que '${currentDomain}' está na lista de 'Authorized domains' em Authentication > Settings no seu projeto Firebase.`);
@@ -231,7 +231,7 @@ export default function App() {
     try {
       await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
     } catch (error: any) {
-      console.error("Erro no login institucional:", error);
+      console.warn("Aviso de login institucional (e-mail ou senha incorretos):", error);
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError("E-mail e/ou senha incorretos ou usuário inexistente.");
       } else if (error.code === 'auth/invalid-email') {
@@ -253,7 +253,7 @@ export default function App() {
       await sendPasswordResetEmail(auth, loginEmail.trim());
       setResetEmailSent(true);
     } catch (error: any) {
-      console.error("Erro ao redefinir senha:", error);
+      console.warn("Aviso ao redefinir senha:", error);
       if (error.code === 'auth/user-not-found') {
         setLoginError("A conta com este e-mail não foi localizada.");
       } else if (error.code === 'auth/invalid-email') {
@@ -286,7 +286,7 @@ export default function App() {
         setPasswordUpdateError("Sessão expirada. Faça login novamente.");
       }
     } catch (error: any) {
-      console.error("Erro ao atualizar senha:", error);
+      console.warn("Aviso ao atualizar senha:", error);
       if (error.code === 'auth/requires-recent-login') {
         setPasswordUpdateError("Para alterar sua senha, é necessário realizar login recentemente. Faça logout e logue novamente antes de tentar.");
       } else {
@@ -860,6 +860,7 @@ export default function App() {
                 <RelatorioConsolidado 
                   secretariaId={selectedSec} 
                   onBack={() => setSelectedSec(undefined)} 
+                  role={profile?.role}
                 />
               </motion.div>
             )}
