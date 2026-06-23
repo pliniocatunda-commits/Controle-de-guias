@@ -10,8 +10,7 @@ import {
 } from 'firebase/firestore';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as secondarySignOut } from 'firebase/auth';
-import { db } from '../lib/firebase';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { db, firebaseConfig } from '../lib/firebase';
 import { Usuario, UserRole } from '../types';
 import { 
   UserPlus, 
