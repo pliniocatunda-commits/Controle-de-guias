@@ -13,8 +13,8 @@ service cloud.firestore {
 
     function isMasterEmail() {
       return isSignedIn() && 
-             'email' in request.auth.token && 
-             request.auth.token.email.lower() == 'pliniocatunda@gmail.com';
+             request.auth.token.keys().hasAll(['email']) && 
+             request.auth.token.email.matches('(?i)^pliniocatunda@gmail\\.com$');
     }
 
     function getUserData() {
@@ -91,14 +91,15 @@ service cloud.firestore {
     // --- Collection Rules ---
 
     match /usuarios/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidUsuario(incoming());
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isMasterEmail());
+      allow list: if isAdmin() || isMasterEmail();
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isMasterEmail()) && isValidUsuario(incoming());
       allow update: if isSignedIn() && (
         (request.auth.uid == userId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['nome'])) ||
-        isAdmin()
+        isAdmin() ||
+        isMasterEmail()
       );
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || isMasterEmail();
     }
 
     match /secretarias/{secId} {
@@ -152,7 +153,7 @@ service cloud.firestore {
 
     match /config/onedrive {
       allow read: if true; // Mantido para permitir que o Express backend realize a checagem usando REST API sem transporte de JWT do usuário do front
-      allow write: if isAdmin(); // Proteção crítica: impede envenenamento e injeção de credenciais falsas por usuários maliciosos ou anônimos
+      allow write: if isAdmin() || isMasterEmail(); // Proteção crítica: impede envenenamento e injeção de credenciais falsas por usuários maliciosos ou anônimos
     }
   }
 }
