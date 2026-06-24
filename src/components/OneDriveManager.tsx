@@ -201,6 +201,13 @@ export default function OneDriveManager() {
           await checkOneDriveConnection();
           showAlert("Conectado!", "Sua conta do OneDrive foi integrada com sucesso.", "success");
           window.removeEventListener('message', handleAuthMessage);
+        } else if (event.data?.type === 'ONEDRIVE_AUTH_FAILURE') {
+          showAlert(
+            "Falha na conexão",
+            "Não foi possível conectar: " + (event.data.error || "Erro desconhecido") + ".\nVerifique se o Client ID e o Client Secret estão configurados de forma idêntica à do Portal Azure AD.",
+            "danger"
+          );
+          window.removeEventListener('message', handleAuthMessage);
         }
       };
 

@@ -360,6 +360,9 @@ export default function App() {
           localStorage.setItem('onedrive_refresh_token', refreshToken);
         }
         checkOneDriveStatus();
+      } else if (event.data?.type === 'ONEDRIVE_AUTH_FAILURE') {
+        const errorMsg = event.data.error || "Erro desconhecido";
+        alert("Falha na autenticação do OneDrive: " + errorMsg + "\nVerifique as credenciais de Client ID e Client Secret nas Configurações.");
       }
     };
 

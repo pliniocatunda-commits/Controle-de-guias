@@ -254,6 +254,13 @@ export default function RelatorioConsolidado({
             "success",
           );
           window.removeEventListener("message", handleAuthMessage);
+        } else if (event.data?.type === "ONEDRIVE_AUTH_FAILURE") {
+          showAlert(
+            "Falha na conexão",
+            "Não foi possível conectar com o OneDrive: " + (event.data.error || "Erro desconhecido") + ".\nVerifique se o Client ID e o Client Secret estão configurados corretamente e se a URL de redirecionamento está correta no painel Azure AD.",
+            "danger",
+          );
+          window.removeEventListener("message", handleAuthMessage);
         }
       };
 

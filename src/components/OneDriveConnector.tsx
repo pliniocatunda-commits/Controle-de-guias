@@ -35,6 +35,9 @@ export default function OneDriveConnector({ role }: Props) {
           localStorage.setItem('onedrive_refresh_token', refreshToken);
         }
         checkStatus();
+      } else if (event.data?.type === 'ONEDRIVE_AUTH_FAILURE') {
+        setError("Falha na autenticação: " + (event.data.error || "Erro desconhecido") + ". Verifique se o Client ID e o Client Secret estão configurados corretamente e se o URI de redirecionamento está registrado no Portal Azure AD.");
+        setShowHelp(true);
       }
     };
 

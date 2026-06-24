@@ -444,7 +444,34 @@ async function startServer() {
       `);
     } catch (error: any) {
       console.error("Erro no callback OAuth:", error);
-      res.status(500).send(`Erro na autenticação: ${error.message}`);
+      res.status(500).send(`
+        <html>
+          <body>
+            <script>
+              if (window.opener) {
+                try {
+                  window.opener.postMessage({ 
+                    type: 'ONEDRIVE_AUTH_FAILURE',
+                    error: ${JSON.stringify(error.message || "Erro desconhecido")}
+                  }, '*');
+                } catch (e) {
+                  console.error("Erro ao notificar janela principal:", e);
+                }
+                setTimeout(function() {
+                  try {
+                    window.close();
+                  } catch (closeErr) {
+                    console.error("Erro ao fechar janela:", closeErr);
+                  }
+                }, 1500);
+              }
+            </script>
+            <p style="color: #ef4444; font-family: sans-serif; font-weight: bold; padding: 20px; text-align: center;">
+              Erro na autenticação: ${error.message}
+            </p>
+          </body>
+        </html>
+      `);
     }
   });
 
