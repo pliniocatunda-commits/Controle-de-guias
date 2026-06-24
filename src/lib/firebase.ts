@@ -13,7 +13,7 @@ export const firebaseConfig = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletFirebaseConfig.messagingSenderId,
   appId: import.meta.env.VITE_FIREBASE_APP_ID || appletFirebaseConfig.appId,
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || appletFirebaseConfig.measurementId || "",
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || appletFirebaseConfig.firestoreDatabaseId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || (import.meta.env.VITE_FIREBASE_PROJECT_ID ? "" : appletFirebaseConfig.firestoreDatabaseId),
 };
 
 const app = initializeApp(firebaseConfig);
