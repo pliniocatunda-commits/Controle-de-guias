@@ -139,7 +139,7 @@ export default function App() {
         if (u) {
           const userDoc = await runWithTimeout(
             getDoc(doc(db, 'usuarios', u.uid)),
-            3500,
+            15000,
             'Timeout ao buscar perfil do usuário.'
           );
           const emailLower = u.email?.toLowerCase();
@@ -151,7 +151,7 @@ export default function App() {
               const updatedProfile = { ...profileData, role: 'master' as const };
               await runWithTimeout(
                 setDoc(doc(db, 'usuarios', u.uid), updatedProfile, { merge: true }),
-                3500,
+                15000,
                 'Timeout ao atualizar perfil.'
               );
               setProfile(updatedProfile);
@@ -163,7 +163,7 @@ export default function App() {
             const q = query(collection(db, "usuarios"), where("email", "==", emailLower));
             const querySnap = await runWithTimeout(
               getDocs(q),
-              3500,
+              15000,
               'Timeout ao verificar perfis existentes.'
             );
             
@@ -179,12 +179,12 @@ export default function App() {
               // Write the true UID profile and safely delete the temporary document
               await runWithTimeout(
                 setDoc(doc(db, 'usuarios', u.uid), mergedProfile),
-                3500,
+                15000,
                 'Timeout ao salvar novo perfil mesclado.'
               );
               await runWithTimeout(
                 deleteDoc(existingDoc.ref),
-                3500,
+                15000,
                 'Timeout ao remover perfil temporário.'
               );
               setProfile(mergedProfile);
@@ -200,7 +200,7 @@ export default function App() {
               };
               await runWithTimeout(
                 setDoc(doc(db, 'usuarios', u.uid), newProfile),
-                3500,
+                15000,
                 'Timeout ao criar novo perfil.'
               );
               setProfile(newProfile);

@@ -26,11 +26,11 @@ export interface OneDriveConfig {
 }
 
 export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
-  // 1. Tenta carregar do Firestore primeiro (útil para Vercel sem backend) com timeout de 4 segundos
+  // 1. Tenta carregar do Firestore primeiro (útil para Vercel sem backend) com timeout de 15 segundos
   try {
     const configDoc = await runWithTimeout(
       getDoc(doc(db, 'config', 'onedrive')),
-      4000,
+      15000,
       'Timeout ao carregar configurações do OneDrive no Firestore. O Firestore pode não estar ativado.'
     );
     if (configDoc.exists()) {
@@ -73,7 +73,7 @@ export async function saveOneDriveConfig(config: OneDriveConfig): Promise<void> 
         tenant: config.tenant ? config.tenant.trim() : 'common',
         updatedAt: new Date().toISOString()
       }),
-      4000,
+      15000,
       'Não foi possível salvar no Firebase. Verifique se o serviço "Cloud Firestore" está ATIVADO (criado) no console do seu projeto Firebase (ipmeusebio-e02e4) e se você criou a base de dados padrão no modo de teste.'
     );
   } catch (err: any) {

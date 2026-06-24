@@ -36,7 +36,7 @@ export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000,
 
 async function testConnection() {
   try {
-    await runWithTimeout(getDocFromServer(doc(db, 'test', 'connection')), 3000);
+    await runWithTimeout(getDocFromServer(doc(db, 'test', 'connection')), 15000);
     console.log('Firebase connection successful');
   } catch (error) {
     console.warn("Firebase test connection warning/error:", error);
