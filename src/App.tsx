@@ -13,7 +13,7 @@ import {
   Cloud,
   Lock
 } from 'lucide-react';
-import { auth, googleProvider, db } from './lib/firebase';
+import { auth, googleProvider, db, runWithTimeout } from './lib/firebase';
 import { 
   signInWithPopup, 
   signOut, 
@@ -137,7 +137,11 @@ export default function App() {
       setUser(u);
       try {
         if (u) {
-          const userDoc = await getDoc(doc(db, 'usuarios', u.uid));
+          const userDoc = await runWithTimeout(
+            getDoc(doc(db, 'usuarios', u.uid)),
+            3500,
+            'Timeout ao buscar perfil do usuário.'
+          );
           const emailLower = u.email?.toLowerCase();
           
           if (userDoc.exists()) {
@@ -145,7 +149,11 @@ export default function App() {
             // Force master role if user is Pliniocatunda@gmail.com
             if (emailLower === 'pliniocatunda@gmail.com' && profileData.role !== 'master') {
               const updatedProfile = { ...profileData, role: 'master' as const };
-              await setDoc(doc(db, 'usuarios', u.uid), updatedProfile, { merge: true });
+              await runWithTimeout(
+                setDoc(doc(db, 'usuarios', u.uid), updatedProfile, { merge: true }),
+                3500,
+                'Timeout ao atualizar perfil.'
+              );
               setProfile(updatedProfile);
             } else {
               setProfile(profileData);
@@ -153,7 +161,11 @@ export default function App() {
           } else {
             // Check if there is an existing design/profile created manually by the admin for this email (with temp ID)
             const q = query(collection(db, "usuarios"), where("email", "==", emailLower));
-            const querySnap = await getDocs(q);
+            const querySnap = await runWithTimeout(
+              getDocs(q),
+              3500,
+              'Timeout ao verificar perfis existentes.'
+            );
             
             if (!querySnap.empty) {
               const existingDoc = querySnap.docs[0];
@@ -165,8 +177,16 @@ export default function App() {
               } as Usuario;
 
               // Write the true UID profile and safely delete the temporary document
-              await setDoc(doc(db, 'usuarios', u.uid), mergedProfile);
-              await deleteDoc(existingDoc.ref);
+              await runWithTimeout(
+                setDoc(doc(db, 'usuarios', u.uid), mergedProfile),
+                3500,
+                'Timeout ao salvar novo perfil mesclado.'
+              );
+              await runWithTimeout(
+                deleteDoc(existingDoc.ref),
+                3500,
+                'Timeout ao remover perfil temporário.'
+              );
               setProfile(mergedProfile);
             } else {
               // If profile doc doesn't exist yet, we check if it's the designated master user. Otherwise default to 'consulta'.
@@ -178,7 +198,11 @@ export default function App() {
                 role: isMasterEmail ? 'master' : 'consulta', 
                 createdAt: new Date().toISOString()
               };
-              await setDoc(doc(db, 'usuarios', u.uid), newProfile);
+              await runWithTimeout(
+                setDoc(doc(db, 'usuarios', u.uid), newProfile),
+                3500,
+                'Timeout ao criar novo perfil.'
+              );
               setProfile(newProfile);
             }
           }

@@ -1,7 +1,7 @@
 /**
  * Serviço para interagir com a API do OneDrive via Backend ou diretamente via Cliente-Side
  */
-import { db } from '../lib/firebase';
+import { db, runWithTimeout } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export interface OneDriveUser {
@@ -26,9 +26,13 @@ export interface OneDriveConfig {
 }
 
 export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
-  // 1. Tenta carregar do Firestore primeiro (útil para Vercel sem backend)
+  // 1. Tenta carregar do Firestore primeiro (útil para Vercel sem backend) com timeout de 4 segundos
   try {
-    const configDoc = await getDoc(doc(db, 'config', 'onedrive'));
+    const configDoc = await runWithTimeout(
+      getDoc(doc(db, 'config', 'onedrive')),
+      4000,
+      'Timeout ao carregar configurações do OneDrive no Firestore. O Firestore pode não estar ativado.'
+    );
     if (configDoc.exists()) {
       const data = configDoc.data();
       if (data.clientId) {
@@ -61,12 +65,20 @@ export async function getOneDriveConfig(): Promise<OneDriveConfig | null> {
 }
 
 export async function saveOneDriveConfig(config: OneDriveConfig): Promise<void> {
-  await setDoc(doc(db, 'config', 'onedrive'), {
-    clientId: config.clientId.trim(),
-    clientSecret: config.clientSecret ? config.clientSecret.trim() : '',
-    tenant: config.tenant ? config.tenant.trim() : 'common',
-    updatedAt: new Date().toISOString()
-  });
+  try {
+    await runWithTimeout(
+      setDoc(doc(db, 'config', 'onedrive'), {
+        clientId: config.clientId.trim(),
+        clientSecret: config.clientSecret ? config.clientSecret.trim() : '',
+        tenant: config.tenant ? config.tenant.trim() : 'common',
+        updatedAt: new Date().toISOString()
+      }),
+      4000,
+      'Não foi possível salvar no Firebase. Verifique se o serviço "Cloud Firestore" está ATIVADO (criado) no console do seu projeto Firebase (ipmeusebio-e02e4) e se você criou a base de dados padrão no modo de teste.'
+    );
+  } catch (err: any) {
+    throw new Error(err.message || 'Erro ao salvar configurações no Firestore.');
+  }
 }
 
 // Wrapper para requisições de API com cabeçalhos de autenticação e persistência robusta

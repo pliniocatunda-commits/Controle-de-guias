@@ -22,14 +22,24 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId && fireba
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
+export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000, errorMessage: string = 'Operação expirou (timeout).'): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await runWithTimeout(getDocFromServer(doc(db, 'test', 'connection')), 3000);
     console.log('Firebase connection successful');
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    }
+    console.warn("Firebase test connection warning/error:", error);
   }
 }
 
