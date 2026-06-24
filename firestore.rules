@@ -13,8 +13,8 @@ service cloud.firestore {
 
     function isMasterEmail() {
       return isSignedIn() && 
-             request.auth.token.keys().hasAll(['email']) && 
-             request.auth.token.email.matches('(?i)pliniocatunda@gmail\\.com');
+             'email' in request.auth.token && 
+             request.auth.token.email.lower() == 'pliniocatunda@gmail.com';
     }
 
     function getUserData() {
