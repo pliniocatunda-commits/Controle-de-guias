@@ -99,11 +99,13 @@ export default function App() {
         } catch (e) {
           console.error("Erro ao notificar janela principal:", e);
         }
-        try {
-          window.close();
-        } catch (closeErr) {
-          console.error("Erro ao fechar janela:", closeErr);
-        }
+        setTimeout(function() {
+          try {
+            window.close();
+          } catch (closeErr) {
+            console.error("Erro ao fechar janela:", closeErr);
+          }
+        }, 800);
       } else {
         // Se abriu na mesma aba, redefine para a raiz e recarrega
         window.history.replaceState({}, document.title, '/');
@@ -328,11 +330,6 @@ export default function App() {
   };
 
   const checkOneDriveStatus = async () => {
-    const token = localStorage.getItem('onedrive_token');
-    if (!token) {
-      setOnedriveUser(null);
-      return;
-    }
     setLoadingOnedriveUser(true);
     try {
       const userData = await onedriveService.getUser();
@@ -365,9 +362,19 @@ export default function App() {
         checkOneDriveStatus();
       }
     };
+
+    const handleFocus = () => {
+      if (user) {
+        checkOneDriveStatus();
+      }
+    };
     
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [user]);
 
   const handleOneDriveDisconnect = () => {

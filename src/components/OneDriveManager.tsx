@@ -83,6 +83,14 @@ export default function OneDriveManager() {
   useEffect(() => {
     checkOneDriveConnection();
     loadSystemData();
+
+    const handleFocus = () => {
+      checkOneDriveConnection();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const checkOneDriveConnection = async () => {

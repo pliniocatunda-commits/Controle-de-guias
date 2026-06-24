@@ -414,12 +414,22 @@ async function startServer() {
           <body>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ 
-                  type: 'ONEDRIVE_AUTH_SUCCESS',
-                  token: ${JSON.stringify(data.access_token)},
-                  refreshToken: ${JSON.stringify(data.refresh_token || null)}
-                }, '*');
-                window.close();
+                try {
+                  window.opener.postMessage({ 
+                    type: 'ONEDRIVE_AUTH_SUCCESS',
+                    token: ${JSON.stringify(data.access_token)},
+                    refreshToken: ${JSON.stringify(data.refresh_token || null)}
+                  }, '*');
+                } catch (e) {
+                  console.error("Erro ao notificar janela principal:", e);
+                }
+                setTimeout(function() {
+                  try {
+                    window.close();
+                  } catch (closeErr) {
+                    console.error("Erro ao fechar janela:", closeErr);
+                  }
+                }, 800);
               } else {
                 localStorage.setItem('onedrive_token', ${JSON.stringify(data.access_token)});
                 if (${JSON.stringify(data.refresh_token || null)}) {

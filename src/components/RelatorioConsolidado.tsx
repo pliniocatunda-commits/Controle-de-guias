@@ -388,6 +388,16 @@ export default function RelatorioConsolidado({
     checkOneDriveStatus();
   }, [secretariaId, mes, ano]);
 
+  useEffect(() => {
+    const handleFocus = () => {
+      checkOneDriveStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, []);
+
   const handleInlineUpdate = async (
     guiaId: string,
     field: string,

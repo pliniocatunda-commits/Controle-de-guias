@@ -38,8 +38,16 @@ export default function OneDriveConnector({ role }: Props) {
       }
     };
 
+    const handleFocus = () => {
+      checkStatus();
+    };
+
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   useEffect(() => {
