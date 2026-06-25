@@ -251,6 +251,7 @@ export const onedriveService = {
       redirect_uri: currentRedirectUri,
       scope: "files.readwrite.all User.Read offline_access",
       state: "12345",
+      prompt: "select_account",
     });
 
     if (codeChallenge) {

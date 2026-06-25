@@ -353,6 +353,7 @@ async function startServer() {
       response_mode: "query",
       scope: "files.readwrite.all User.Read offline_access",
       state: "12345", // Em produção use algo dinâmico
+      prompt: "select_account",
     });
 
     const authUrl = `https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
