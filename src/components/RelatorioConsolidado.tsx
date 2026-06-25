@@ -363,12 +363,12 @@ export default function RelatorioConsolidado({
         query(
           collection(db, "departamentos"),
           where("secretariaId", "==", secretariaId),
-          orderBy("nome", "asc"),
         ),
       );
       const depts = deptSnap.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() }) as Departamento,
       );
+      depts.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
       setDepartamentos(depts);
 
       const guiasSnap = await getDocs(
