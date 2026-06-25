@@ -188,6 +188,28 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
   return response;
 }
 
+function generateCodeVerifier(): string {
+  const array = new Uint32Array(56);
+  window.crypto.getRandomValues(array);
+  return Array.from(array, dec => ('0' + dec.toString(16)).slice(-2)).join('');
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const hash = await window.crypto.subtle.digest('SHA-256', data);
+  let binary = '';
+  const bytes = new Uint8Array(hash);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 export const onedriveService = {
   async getAuthUrl(): Promise<string> {
     const isVercel = window.location.hostname.includes('vercel.app');
@@ -212,17 +234,80 @@ export const onedriveService = {
       throw new Error('OneDrive não está configurado. Registre o Client ID no painel de configurações para ativar a conexão.');
     }
 
+    // Gerar PKCE Verifier e Challenge
+    const codeVerifier = generateCodeVerifier();
+    sessionStorage.setItem('onedrive_code_verifier', codeVerifier);
+
+    let codeChallenge = '';
+    try {
+      codeChallenge = await generateCodeChallenge(codeVerifier);
+    } catch (e) {
+      console.warn("Erro ao gerar Code Challenge usando Web Crypto.", e);
+    }
+
     const currentRedirectUri = `${window.location.origin}/auth/callback`;
     const params = new URLSearchParams({
       client_id: config.clientId.trim(),
-      response_type: "token", // Implicit Grant flow para SPAs estáticos sem necessidade de segredo no backend
+      response_type: "code", // Alterado de "token" para "code" para evitar erro no Azure AD/Vercel
       redirect_uri: currentRedirectUri,
-      response_mode: "fragment",
-      scope: "files.readwrite.all User.Read",
+      scope: "files.readwrite.all User.Read offline_access",
       state: "12345",
     });
 
+    if (codeChallenge) {
+      params.append('code_challenge', codeChallenge);
+      params.append('code_challenge_method', 'S256');
+    }
+
     return `https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
+  },
+
+  async exchangeCodeForToken(code: string, codeVerifier: string | null): Promise<{ token: string; refreshToken?: string }> {
+    const config = await getOneDriveConfig();
+    if (!config || !config.clientId) {
+      throw new Error('OneDrive não está configurado no banco de dados ou ambiente.');
+    }
+
+    const currentRedirectUri = `${window.location.origin}/auth/callback`;
+    const params = new URLSearchParams({
+      client_id: config.clientId.trim(),
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: currentRedirectUri,
+    });
+
+    if (config.clientSecret) {
+      params.append('client_secret', config.clientSecret.trim());
+    }
+    if (codeVerifier) {
+      params.append('code_verifier', codeVerifier);
+    }
+
+    const tokenUrl = `https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/token`;
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString()
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let parsedErr;
+      try {
+        parsedErr = JSON.parse(errText);
+      } catch {}
+      const errMsg = parsedErr?.error_description || parsedErr?.error || errText;
+      throw new Error('Falha ao trocar código pelo token do OneDrive: ' + errMsg);
+    }
+
+    const data = await response.json();
+    return {
+      token: data.access_token,
+      refreshToken: data.refresh_token
+    };
   },
 
   async getUser(): Promise<OneDriveUser | null> {

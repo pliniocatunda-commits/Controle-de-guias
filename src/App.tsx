@@ -70,6 +70,7 @@ export default function App() {
   const isAuthCallback = window.location.pathname.includes('/auth/callback') || 
                          window.location.hash.includes('access_token=') || 
                          window.location.search.includes('access_token=') || 
+                         window.location.search.includes('code=') || 
                          window.location.search.includes('error=');
 
   useEffect(() => {
@@ -82,6 +83,72 @@ export default function App() {
     const hashParams = new URLSearchParams(hashCleaned);
     const searchParams = new URLSearchParams(search);
     
+    const code = searchParams.get('code') || hashParams.get('code');
+    if (code) {
+      const exchangeCode = async () => {
+        try {
+          const verifier = sessionStorage.getItem('onedrive_code_verifier');
+          const result = await onedriveService.exchangeCodeForToken(code, verifier);
+          
+          if (result.token) {
+            localStorage.setItem('onedrive_token', result.token);
+            if (result.refreshToken) {
+              localStorage.setItem('onedrive_refresh_token', result.refreshToken);
+            }
+
+            if (window.opener) {
+              try {
+                window.opener.postMessage({ 
+                  type: 'ONEDRIVE_AUTH_SUCCESS',
+                  token: result.token,
+                  refreshToken: result.refreshToken || null
+                }, '*');
+              } catch (e) {
+                console.error("Erro ao notificar janela principal:", e);
+              }
+              
+              setTimeout(function() {
+                try {
+                  window.close();
+                } catch (closeErr) {
+                  console.error("Erro ao fechar janela:", closeErr);
+                }
+              }, 800);
+            } else {
+              window.history.replaceState({}, document.title, '/');
+              window.location.reload();
+            }
+          } else {
+            throw new Error("Não foi possível obter o token de acesso do OneDrive.");
+          }
+        } catch (err: any) {
+          console.error("Erro ao trocar código por token:", err);
+          if (window.opener) {
+            try {
+              window.opener.postMessage({ 
+                type: 'ONEDRIVE_AUTH_FAILURE',
+                error: err.message || "Erro desconhecido ao autenticar"
+              }, '*');
+            } catch (e) {
+              console.error("Erro ao notificar falha:", e);
+            }
+            setTimeout(function() {
+              try {
+                window.close();
+              } catch (closeErr) {
+                console.error("Erro ao fechar janela de erro:", closeErr);
+              }
+            }, 1500);
+          } else {
+            alert("Erro na Autenticação com OneDrive: " + err.message);
+            window.history.replaceState({}, document.title, '/');
+            window.location.reload();
+          }
+        }
+      };
+      exchangeCode();
+      return;
+    }
     const token = hashParams.get('access_token') || searchParams.get('access_token');
     const errorDesc = hashParams.get('error_description') || searchParams.get('error_description') || 
                       hashParams.get('error') || searchParams.get('error');
