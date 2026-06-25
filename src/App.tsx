@@ -429,7 +429,21 @@ export default function App() {
         checkOneDriveStatus();
       } else if (event.data?.type === 'ONEDRIVE_AUTH_FAILURE') {
         const errorMsg = event.data.error || "Erro desconhecido";
-        alert("Falha na autenticação do OneDrive: " + errorMsg + "\nVerifique as credenciais de Client ID e Client Secret nas Configurações.");
+        if (errorMsg.includes("AADSTS90023") || errorMsg.includes("Single-Page Application")) {
+          alert(
+            "Falha na autenticação do OneDrive (Erro de Plataforma SPA):\n\n" +
+            "Seu aplicativo do Azure AD está configurado como 'Web' na Autenticação, mas como você está acessando no navegador, o Azure exige uma configuração de 'SPA' (Single-Page Application).\n\n" +
+            "COMO RESOLVER:\n" +
+            "1. Acesse o Portal do Azure AD.\n" +
+            "2. Vá em 'Registros de aplicativo' e clique no seu App.\n" +
+            "3. Vá na aba 'Autenticação'.\n" +
+            "4. Clique em 'Adicionar uma plataforma' e escolha 'SPA (Aplicativo de página única)'.\n" +
+            "5. Insira a URL de redirecionamento (o link que termina em /auth/callback) lá e salve.\n" +
+            "6. Remova a configuração antiga da seção 'Web' se desejar e tente novamente!"
+          );
+        } else {
+          alert("Falha na autenticação do OneDrive: " + errorMsg + "\nVerifique as credenciais de Client ID e Client Secret nas Configurações.");
+        }
       }
     };
 

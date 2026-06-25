@@ -36,7 +36,16 @@ export default function OneDriveConnector({ role }: Props) {
         }
         checkStatus();
       } else if (event.data?.type === 'ONEDRIVE_AUTH_FAILURE') {
-        setError("Falha na autenticação: " + (event.data.error || "Erro desconhecido") + ". Verifique se o Client ID e o Client Secret estão configurados corretamente e se o URI de redirecionamento está registrado no Portal Azure AD.");
+        const errorMsg = event.data.error || "Erro desconhecido";
+        if (errorMsg.includes("AADSTS90023") || errorMsg.includes("Single-Page Application")) {
+          setError(
+            "ERRO DE PLATAFORMA (SPA): Você está acessando a aplicação via navegador (como na Vercel). " +
+            "Para que a autenticação funcione, o URI de Redirecionamento deve estar configurado no Azure AD como plataforma 'Aplicativo de página única (SPA)' (Single-Page Application), e não como 'Web'. " +
+            "Por favor, configure o SPA no seu painel de Autenticação do Azure AD usando o link de redirecionamento fornecido abaixo."
+          );
+        } else {
+          setError("Falha na autenticação: " + errorMsg + ". Verifique se o Client ID e o Client Secret estão configurados corretamente e se o URI de redirecionamento está registrado no Portal Azure AD.");
+        }
         setShowHelp(true);
       }
     };
@@ -304,7 +313,7 @@ export default function OneDriveConnector({ role }: Props) {
                     {diagnostics.finalRedirectUri}
                   </div>
                   <p className="text-[10px] text-gray-400 mt-1 leading-normal italic">
-                    ⚠️ Atenção: O link acima DEVE ser copiado e colado exatamente idêntico no campo <strong>URI de redirecionamento</strong> plataforma <strong>Web</strong> na sua tela do Azure AD.
+                    ⚠️ Atenção: Para acessos via Vercel ou cliente direto, o link acima DEVE ser registrado na plataforma <strong>SPA (Aplicativo de página única)</strong> nas configurações de Autenticação no Azure AD. Caso contrário, ocorrerá o erro <code>AADSTS90023</code>.
                   </p>
                 </div>
 
@@ -406,7 +415,7 @@ export default function OneDriveConnector({ role }: Props) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <span className="block font-bold text-gray-400 uppercase tracking-widest text-[9px]">1. URL de Redirecionamento Recomendada</span>
-              <p className="text-gray-500 text-[11px]">Você deve adicionar este link exatamente como está listado sob a plataforma <strong>Web</strong> nas configurações de autenticação do seu App no Azure:</p>
+              <p className="text-gray-500 text-[11px]">Você deve adicionar este link preferencialmente sob a plataforma <strong>SPA (Aplicativo de Página Única)</strong> se estiver no Vercel (ou <strong>Web</strong> se estiver rodando o servidor backend próprio) nas configurações de autenticação do seu App no Azure:</p>
               
               <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 p-2 rounded-lg font-mono text-[10px] text-gray-700">
                 <span className="truncate flex-1">{getRedirectUri()}</span>
@@ -455,7 +464,7 @@ export default function OneDriveConnector({ role }: Props) {
             <ul className="list-disc pl-4 space-y-1 text-gray-600 text-[11px]">
               <li>No painel do Azure, vá em <strong>Registros de aplicativo</strong> (App Registrations).</li>
               <li>Ao criar, selecione <strong>Tipos de conta com suporte:</strong> Multilocatário + Contas pessoais da Microsoft.</li>
-              <li>Em <strong>Autenticação</strong>, adicione uma plataforma <strong>Web</strong> e insira a URI de Redirecionamento mostrada acima.</li>
+              <li>Em <strong>Autenticação</strong>, clique em <strong>Adicionar uma plataforma</strong>, escolha <strong>SPA (Aplicativo de Página Única)</strong> (recomendado para Vercel) ou <strong>Web</strong> (para servidor de backend dedicado) e insira a URI de Redirecionamento mostrada acima.</li>
               <li>Em <strong>Certificados e segredos</strong>, crie um novo Segredo do Cliente e copie o <strong>VALOR</strong> (não ID).</li>
               <li>No AI Studio (no topo da tela em <code>Settings &gt; Environment Variables</code>), configure:
                 <ul className="list-none pl-2.5 mt-1 space-y-0.5 text-gray-700 font-mono text-[10px]">
