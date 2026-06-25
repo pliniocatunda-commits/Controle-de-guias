@@ -145,9 +145,8 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
           grant_type: "refresh_token",
           refresh_token: refreshToken,
         };
-        if (config.clientSecret) {
-          bodyParams.client_secret = config.clientSecret;
-        }
+        // Para renovação direta pelo navegador (fluxo SPA), NÃO devemos enviar o client_secret.
+        // Caso contrário, o Azure AD retornará erro cross-origin (AADSTS90023).
 
         const refreshRes = await fetch(`https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/token`, {
           method: "POST",
@@ -276,9 +275,8 @@ export const onedriveService = {
       redirect_uri: currentRedirectUri,
     });
 
-    if (config.clientSecret) {
-      params.append('client_secret', config.clientSecret.trim());
-    }
+    // Em chamadas diretas pelo navegador (fluxo de SPA), NÃO devemos enviar o client_secret.
+    // O Azure AD impede a troca de tokens via CORS se o client_secret estiver presente (Erro AADSTS90023).
     if (codeVerifier) {
       params.append('code_verifier', codeVerifier);
     }
