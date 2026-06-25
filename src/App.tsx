@@ -546,6 +546,9 @@ export default function App() {
         </div>
         <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-8 relative overflow-y-auto">
            <div className="w-full max-w-sm py-12 md:py-0">
+              <div className="mb-6 flex justify-center">
+                 <IpmeLogo variant="horizontal" className="!h-24 md:!h-28" />
+              </div>
               <h2 className="text-3xl font-extrabold mb-2 text-gray-900 tracking-tight">GestiPrev</h2>
               <p className="text-gray-500 mb-6 text-sm">Controle de pagamentos previdenciários e guias consolidadas.</p>
 
