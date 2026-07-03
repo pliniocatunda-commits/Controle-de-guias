@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import "isomorphic-fetch";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -346,6 +347,22 @@ async function startServer() {
     const currentRedirectUri = getRedirectUri(req);
     console.log("DEBUG: OneDrive Authorization Request URI:", currentRedirectUri);
 
+    // Gerar PKCE para máxima robustez e compatibilidade (necessário para SPA e conexões seguras)
+    const verifier = crypto.randomBytes(32).toString('hex');
+    const hash = crypto.createHash('sha256').update(verifier).digest('base64');
+    const challenge = hash
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // Salva o code_verifier em um cookie seguro (SameSite=None e Secure para funcionar dentro do iframe)
+    res.cookie("onedrive_code_verifier", verifier, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 3600 * 1000, // 1 hora
+    });
+
     const params = new URLSearchParams({
       client_id: trimmedClientId,
       response_type: "code",
@@ -354,6 +371,8 @@ async function startServer() {
       scope: "files.readwrite.all User.Read offline_access",
       state: "12345", // Em produção use algo dinâmico
       prompt: "select_account",
+      code_challenge: challenge,
+      code_challenge_method: "S256",
     });
 
     const authUrl = `https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
@@ -368,22 +387,38 @@ async function startServer() {
       return res.status(400).send("Código de autorização ausente");
     }
 
+    // Recupera o code_verifier salvo no cookie (caso tenha sido iniciado pelo servidor ou pela SPA que salvou o cookie)
+    const codeVerifier = req.cookies.onedrive_code_verifier;
+
     try {
       const creds = await getOneDriveCredentials();
       const currentRedirectUri = getRedirectUri(req);
+
+      const tokenRequestBody: Record<string, string> = {
+        client_id: creds.clientId || "",
+        client_secret: creds.clientSecret || "",
+        code: code as string,
+        redirect_uri: currentRedirectUri,
+        grant_type: "authorization_code",
+      };
+
+      if (codeVerifier) {
+        tokenRequestBody.code_verifier = codeVerifier;
+      }
+
       const response = await fetchWithTimeout(`https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: creds.clientId || "",
-          client_secret: creds.clientSecret || "",
-          code: code as string,
-          redirect_uri: currentRedirectUri,
-          grant_type: "authorization_code",
-        }),
+        body: new URLSearchParams(tokenRequestBody),
       }, 8000);
 
       const data = await response.json();
+
+      // Limpa o cookie temporário do PKCE
+      res.clearCookie("onedrive_code_verifier", {
+        secure: true,
+        sameSite: "none",
+      });
 
       if (data.error) {
         throw new Error(data.error_description || data.error);
@@ -445,6 +480,13 @@ async function startServer() {
       `);
     } catch (error: any) {
       console.error("Erro no callback OAuth:", error);
+      
+      // Limpa o cookie em caso de erro
+      res.clearCookie("onedrive_code_verifier", {
+        secure: true,
+        sameSite: "none",
+      });
+
       res.status(500).send(`
         <html>
           <body>

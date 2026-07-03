@@ -236,6 +236,9 @@ export const onedriveService = {
     // Gerar PKCE Verifier e Challenge
     const codeVerifier = generateCodeVerifier();
     sessionStorage.setItem('onedrive_code_verifier', codeVerifier);
+    
+    // Também salva no cookie para que, se o callback for processado pelo backend Express (Cloud Run), ele saiba o code_verifier correto
+    document.cookie = `onedrive_code_verifier=${codeVerifier}; path=/; max-age=3600; Secure; SameSite=None`;
 
     let codeChallenge = '';
     try {
