@@ -5,15 +5,22 @@ import {
 } from 'recharts';
 import { 
   FileText, CheckCircle2, TrendingUp, Download, Filter,
-  DollarSign, FileCheck, Shield, Users, AlertTriangle
+  DollarSign, FileCheck, Shield, Users, AlertTriangle,
+  X, Info, ExternalLink
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { Guia, Comprovante } from '../types';
+import { Guia, Comprovante, Departamento, Secretaria } from '../types';
 
 const formatBRLValue = (val: number): string => {
   return `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const getNomeMes = (m: number | 'todos'): string => {
+  if (m === 'todos') return 'Todos os Meses';
+  const nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  return nomes[m - 1] || '';
 };
 
 const formatYAxisTick = (val: number): string => {
@@ -61,7 +68,10 @@ const normalizeValue = (val: number | string | undefined | null): number => {
 export default function Dashboard() {
   const [allGuias, setAllGuias] = useState<Guia[]>([]);
   const [allComprovantes, setAllComprovantes] = useState<Comprovante[]>([]);
+  const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
+  const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
 
   // Filters state (defaults to current month and year)
   const [selectedMes, setSelectedMes] = useState<number | 'todos'>(new Date().getMonth() + 1);
@@ -72,6 +82,18 @@ export default function Dashboard() {
     async function fetchData() {
       setLoading(true);
       try {
+        // Fetch secretarias
+        const secsRef = collection(db, 'secretarias');
+        const secsSnapshot = await getDocs(secsRef);
+        const secsData = secsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Secretaria);
+        setSecretarias(secsData);
+
+        // Fetch departamentos
+        const deptsRef = collection(db, 'departamentos');
+        const deptsSnapshot = await getDocs(deptsRef);
+        const deptsData = deptsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Departamento);
+        setDepartamentos(deptsData);
+
         // Fetch all guias
         const guiasRef = collection(db, 'guias');
         const guiasSnapshot = await getDocs(guiasRef);
@@ -167,6 +189,21 @@ export default function Dashboard() {
   });
 
   const totalComprovantes = uniqueComps.size;
+
+  // Group by URL to find shared comprovantes for diagnostics
+  const sharedGroupsMap: Record<string, Guia[]> = {};
+  filteredGuias.forEach(g => {
+    if (g.urlComprovante) {
+      if (!sharedGroupsMap[g.urlComprovante]) {
+        sharedGroupsMap[g.urlComprovante] = [];
+      }
+      sharedGroupsMap[g.urlComprovante].push(g);
+    }
+  });
+
+  const sharedGroupsList = Object.entries(sharedGroupsMap)
+    .filter(([url, list]) => list.length > 1)
+    .map(([url, list]) => ({ url, list }));
 
   // Track discrepancy of documents
   const guiasPendentes = filteredGuias.filter(g => g.status !== 'pago');
@@ -446,29 +483,36 @@ export default function Dashboard() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-rose-50 border border-rose-100 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm"
+          onClick={() => setIsDiagnosticModalOpen(true)}
+          className="bg-rose-50 border border-rose-100 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm cursor-pointer hover:bg-rose-100/70 hover:border-rose-200 transition-all group"
         >
           <div className="flex items-start sm:items-center gap-3.5">
-            <div className="p-3 bg-rose-600 text-white rounded-xl shadow-lg flex items-center justify-center animate-pulse">
+            <div className="p-3 bg-rose-600 text-white rounded-xl shadow-lg flex items-center justify-center animate-pulse group-hover:scale-105 transition-transform">
               <AlertTriangle className="w-5.5 h-5.5" />
             </div>
             <div>
-              <h4 className="text-sm font-black text-rose-950 uppercase tracking-tight">
+              <h4 className="text-sm font-black text-rose-950 uppercase tracking-tight flex items-center gap-2">
                 Atenção: Divergência Detectada entre Guias e Comprovantes!
+                <span className="text-[10px] bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full font-bold group-hover:bg-rose-200 transition-colors">Clique para Analisar</span>
               </h4>
               <p className="text-rose-700 text-xs mt-1 leading-relaxed">
                 Neste período, há <strong className="font-extrabold">{totalGuias} guia(s)</strong> cadastradas e somente <strong className="font-extrabold">{totalComprovantes} comprovante(s)</strong> anexados. Diferença de <strong className="font-extrabold">{difQuantidade} guia(s)</strong> pendente(s) de comprovação de depósito.
               </p>
             </div>
           </div>
-          {totalPendentes > 0 && (
-            <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-              <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Valor Pendente Previsto</span>
-              <span className="inline-block bg-rose-100 text-rose-800 text-xs font-black uppercase tracking-tight px-3 py-1.5 rounded-xl border border-rose-200">
-                {formatBRLValue(valorPendenteTotal)}
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-4 shrink-0 self-stretch sm:self-auto justify-between">
+            {totalPendentes > 0 && (
+              <div className="flex flex-col items-start sm:items-end gap-1">
+                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Valor Pendente Previsto</span>
+                <span className="inline-block bg-rose-100 text-rose-800 text-xs font-black uppercase tracking-tight px-3 py-1.5 rounded-xl border border-rose-200">
+                  {formatBRLValue(valorPendenteTotal)}
+                </span>
+              </div>
+            )}
+            <button className="bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-3 rounded-xl transition-all shadow-sm active:scale-[0.98]">
+              Analisar
+            </button>
+          </div>
         </motion.div>
       )}
 
@@ -707,6 +751,256 @@ export default function Dashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* Diagnostic Discrepancy Modal */}
+      <AnimatePresence>
+        {isDiagnosticModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDiagnosticModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+
+            {/* Modal Box */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="relative bg-white rounded-3xl shadow-2xl border border-gray-100 max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden z-10"
+            >
+              {/* Header */}
+              <header className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-rose-100 text-rose-700 rounded-xl">
+                    <AlertTriangle className="w-5.5 h-5.5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-gray-900 uppercase tracking-tight leading-none">
+                      Diagnóstico de Divergências
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Período: <strong className="text-slate-800">{selectedMes === 'todos' ? 'Todos os Meses' : getNomeMes(selectedMes)}/{selectedAno === 'todos' ? 'Todos os Anos' : selectedAno}</strong> {selectedRegime !== 'todos' && `| Regime: ${selectedRegime}`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsDiagnosticModalOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </header>
+
+              {/* Body */}
+              <div className="p-6 overflow-y-auto space-y-6">
+                
+                {/* Informational Explanation Box */}
+                <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4.5 flex gap-3.5">
+                  <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="text-xs leading-relaxed text-blue-800">
+                    <h5 className="font-extrabold text-blue-950 uppercase tracking-tight mb-1">Entenda as divergências do painel:</h5>
+                    <p className="mb-2">
+                      O painel alerta quando a contagem total de guias cadastradas é diferente da contagem de <strong>arquivos únicos</strong> de comprovantes.
+                    </p>
+                    <p>
+                      Se você pagar mais de uma guia de uma vez e anexar o <strong>mesmo arquivo de comprovante</strong> para elas, o sistema conta esse arquivo apenas uma vez, gerando uma "divergência" matemática no painel, embora todas as guias estejam pagas e regulares!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Summary Mini Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Guias no Período</p>
+                    <p className="text-2xl font-black text-slate-800 mt-1">{totalGuias}</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-rose-50 border border-rose-100">
+                    <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">Falta Comprovante</p>
+                    <p className="text-2xl font-black text-rose-800 mt-1">
+                      {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
+                    <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Comprovantes Compartilhados</p>
+                    <p className="text-2xl font-black text-slate-800 mt-1">
+                      {filteredGuias.filter(g => g.urlComprovante).length - uniqueComps.size}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 1. SEÇÃO: GUIAS PENDENTES (SEM COMPROVANTE) */}
+                <section className="space-y-3">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-1.5 border-b pb-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+                    1. Guias sem Comprovante de Pagamento ({filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length})
+                  </h4>
+                  
+                  {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length > 0 ? (
+                    <div className="divide-y divide-gray-100 max-h-[250px] overflow-y-auto border border-gray-100 rounded-2xl bg-white shadow-sm">
+                      {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).map(g => {
+                        const dept = departamentos.find(d => d.id === g.departamentoId);
+                        const sec = dept ? secretarias.find(s => s.id === dept.secretariaId) : null;
+                        return (
+                          <div key={g.id} className="p-4 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {sec && (
+                                  <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-extrabold text-[9px] uppercase tracking-wider">
+                                    {sec.sigla || sec.nome}
+                                  </span>
+                                )}
+                                <span className="font-extrabold text-slate-900 text-sm">
+                                  {dept ? dept.nome : 'Depto Desconhecido'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-[10px] text-gray-500 font-medium">
+                                <span className="uppercase tracking-widest font-bold">Ref: {g.mes < 10 ? '0' + g.mes : g.mes}/{g.ano}</span>
+                                <span>•</span>
+                                <span className="uppercase tracking-widest font-bold">Tipo: {g.tipo === 'patronal' ? 'Patronal' : 'Segurado'}</span>
+                                <span>•</span>
+                                <span className="uppercase tracking-widest font-bold">Regime: {g.regime || 'Capitalizado'}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0 self-stretch sm:self-auto justify-between">
+                              <div className="text-right">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Valor da Guia</p>
+                                <p className="font-extrabold text-slate-900">{formatBRLValue(g.valor)}</p>
+                              </div>
+                              <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
+                                g.status === 'atrasado' 
+                                  ? 'bg-rose-100 text-rose-800 border-rose-200 animate-pulse'
+                                  : g.status === 'pago' 
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                    : 'bg-amber-100 text-amber-800 border-amber-200'
+                              }`}>
+                                {g.status === 'pago' ? 'Pago (S/ Comprovante)' : g.status === 'atrasado' ? 'Em Atraso' : 'Pendente'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-5 text-center border border-dashed border-slate-200 bg-slate-50/50 rounded-2xl text-gray-400 italic text-xs">
+                      Excelente! Todas as guias possuem arquivo de comprovante vinculado ou estão comprovadas.
+                    </div>
+                  )}
+                </section>
+
+                {/* 2. SEÇÃO: COMPROVANTES COMPARTILHADOS */}
+                <section className="space-y-3">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-1.5 border-b pb-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    2. Guias Pagas em Lote / Comprovantes Compartilhados ({sharedGroupsList.length} grupo(s))
+                  </h4>
+                  
+                  {sharedGroupsList.length > 0 ? (
+                    <div className="space-y-4 max-h-[250px] overflow-y-auto pr-1">
+                      {sharedGroupsList.map(({ url, list }, groupIdx) => {
+                        const firstGuia = list[0];
+                        // Extract filename from URL/path
+                        let filename = 'comprovante_compartilhado.pdf';
+                        try {
+                          if (url.startsWith('http')) {
+                            const decoded = decodeURIComponent(url);
+                            filename = decoded.split('/').pop()?.split('?')[0] || filename;
+                          }
+                        } catch (e) {}
+
+                        return (
+                          <div key={url} className="border border-gray-100 rounded-2xl bg-slate-50/50 p-4 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold flex items-center justify-center text-[10px]">
+                                  {groupIdx + 1}
+                                </span>
+                                <div>
+                                  <p className="font-extrabold text-slate-900">Comprovante de Lote</p>
+                                  <p className="text-[10px] text-gray-400 truncate max-w-[280px]" title={filename}>{filename}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2 py-1 rounded-lg font-black text-[9px] uppercase tracking-wider">
+                                  Vinculado a {list.length} guias
+                                </span>
+                                {url && url !== "manual" && (
+                                  <button
+                                    onClick={() => window.open(url, '_blank')}
+                                    className="p-1.5 bg-white border border-gray-200 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                    title="Visualizar Comprovante"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+                              {list.map(g => {
+                                const dept = departamentos.find(d => d.id === g.departamentoId);
+                                const sec = dept ? secretarias.find(s => s.id === dept.secretariaId) : null;
+                                return (
+                                  <div key={g.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-1.5">
+                                        {sec && (
+                                          <span className="inline-block px-1 bg-slate-100 text-slate-600 rounded font-black text-[8px] uppercase">
+                                            {sec.sigla || sec.nome}
+                                          </span>
+                                        )}
+                                        <span className="font-extrabold text-slate-800">
+                                          {dept ? dept.nome : 'Depto Desconhecido'}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[9px] text-gray-400">
+                                        <span>Ref: {g.mes}/{g.ano}</span>
+                                        <span>•</span>
+                                        <span>{g.tipo === 'patronal' ? 'Patronal' : 'Segurado'}</span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-right">
+                                      <div>
+                                        <p className="text-[9px] text-gray-400">Pago</p>
+                                        <p className="font-extrabold text-slate-800">{formatBRLValue(g.valorPago || g.valor)}</p>
+                                      </div>
+                                      <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 uppercase tracking-wide">
+                                        Ok
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-5 text-center border border-dashed border-slate-200 bg-slate-50/50 rounded-2xl text-gray-400 italic text-xs">
+                      Nenhuma guia no período selecionado compartilha comprovantes.
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              {/* Footer */}
+              <footer className="px-6 py-4 border-t border-gray-100 flex justify-end bg-gray-50/50 gap-3">
+                <button
+                  onClick={() => setIsDiagnosticModalOpen(false)}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest px-5 py-3 rounded-xl transition-all shadow-sm active:scale-[0.98]"
+                >
+                  Fechar Diagnóstico
+                </button>
+              </footer>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
