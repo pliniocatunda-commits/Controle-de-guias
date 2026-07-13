@@ -932,18 +932,6 @@ export default function GuiaList({
                             >
                               <FileText className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() =>
-                                downloadDocument(
-                                  patData.urlGuia,
-                                  `guia-patronal-${dept.nome}.pdf`,
-                                )
-                              }
-                              className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
-                              title="Baixar"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
                             {(role === "master" || role === "admin") && (
                               <button
                                 onClick={() => handleDeleteGuia(patData.id)}
@@ -1134,18 +1122,6 @@ export default function GuiaList({
                               title="Visualizar"
                             >
                               <FileText className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() =>
-                                downloadDocument(
-                                  segData.urlGuia,
-                                  `guia-segurado-${dept.nome}.pdf`,
-                                )
-                              }
-                              className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
-                              title="Baixar"
-                            >
-                              <Download className="w-4 h-4" />
                             </button>
                             {(role === "master" || role === "admin") && (
                               <button

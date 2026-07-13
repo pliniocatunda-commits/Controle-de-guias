@@ -279,7 +279,7 @@ export default function App() {
           setProfile(null);
         }
       } catch (err) {
-        console.error("Erro ao carregar perfil do usuário:", err);
+        console.warn("Aviso ou erro ao carregar perfil do usuário:", err);
         // Fallback for forcing profile on master user even on firestore read block
         if (u) {
           const emailLower = u.email?.toLowerCase();
