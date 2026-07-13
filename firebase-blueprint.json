@@ -37,6 +37,7 @@
         "urlComprovante": { "type": "string", "description": "Link para o comprovante de pagamento" },
         "tipo": { "type": "string", "enum": ["patronal", "segurado"], "description": "Tipo da guia" },
         "identificacaoGrcp": { "type": "string", "description": "Código de identificação GRCP" },
+        "observacao": { "type": "string", "description": "Observação opcional da guia" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["departamentoId", "mes", "ano", "valor", "vencimento", "status", "tipo"]

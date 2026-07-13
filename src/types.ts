@@ -32,6 +32,7 @@ export interface Guia {
   tipo: 'patronal' | 'segurado';
   identificacaoGrcp?: string;
   regime?: string;
+  observacao?: string;
   createdAt: any;
 }
 

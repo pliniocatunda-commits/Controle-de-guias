@@ -73,7 +73,8 @@ service cloud.firestore {
              data.ano is int && data.ano >= 2000 && data.ano <= 2100 &&
              data.valor is number &&
              data.status in ['pendente', 'pago', 'atrasado'] &&
-             (data.keys().hasAny(['nome']) ? data.nome is string : true);
+             (data.keys().hasAny(['nome']) ? data.nome is string : true) &&
+             (data.keys().hasAny(['observacao']) ? (data.observacao is string || data.observacao == null) : true);
     }
 
     function isValidComprovante(data) {
