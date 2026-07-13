@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import appletFirebaseConfig from '../../firebase-applet-config.json';
 
@@ -19,6 +19,11 @@ export const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)' ? firebaseConfig.firestoreDatabaseId : undefined);
+
+// Enable offline persistence for instant reads and caching
+enableIndexedDbPersistence(db).catch((err) => {
+  console.warn("Firestore offline persistence could not be enabled:", err);
+});
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 

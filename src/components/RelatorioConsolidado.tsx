@@ -38,6 +38,7 @@ import {
   Link as LinkIcon,
   Layers,
   Loader2,
+  MessageSquare,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
@@ -202,6 +203,66 @@ export default function RelatorioConsolidado({
       type,
       onConfirm,
     });
+  };
+
+  const [obsModalConfig, setObsModalConfig] = useState<{
+    isOpen: boolean;
+    guiaId: string | null;
+    deptId: string;
+    departamentoNome: string;
+    tipo: "patronal" | "segurado";
+    text: string;
+  } | null>(null);
+
+  const handleSaveObservation = async (
+    guiaId: string | null,
+    deptId: string,
+    tipo: "patronal" | "segurado",
+    text: string,
+  ) => {
+    try {
+      if (guiaId) {
+        await updateDoc(doc(db, "guias", guiaId), { observacao: text });
+        setGuias((prev) =>
+          prev.map((g) =>
+            g.id === guiaId ? { ...g, observacao: text } : g,
+          ),
+        );
+      } else {
+        // Criar uma guia pendente com valor 0 para guardar a observação
+        const docRef = await addDoc(collection(db, "guias"), {
+          departamentoId: deptId,
+          mes: mes,
+          ano: ano,
+          valor: 0,
+          vencimento: format(new Date(ano, mes - 1, 10), "yyyy-MM-dd"),
+          status: "pendente",
+          tipo,
+          regime: activeRegime,
+          observacao: text,
+          createdAt: serverTimestamp(),
+        });
+        
+        const newGuia: Guia = {
+          id: docRef.id,
+          departamentoId: deptId,
+          mes: mes,
+          ano: ano,
+          valor: 0,
+          vencimento: format(new Date(ano, mes - 1, 10), "yyyy-MM-dd"),
+          status: "pendente",
+          tipo,
+          regime: activeRegime,
+          observacao: text,
+          createdAt: new Date(),
+        };
+        setGuias((prev) => [...prev, newGuia]);
+      }
+      showAlert("Sucesso", "Observação salva com sucesso!", "success");
+      setObsModalConfig(null);
+    } catch (error) {
+      console.error("Erro ao salvar observação:", error);
+    }
   };
 
   const checkOneDriveStatus = async () => {
@@ -767,13 +828,13 @@ export default function RelatorioConsolidado({
                   DEPTO
                 </th>
                 <th
-                  colSpan={4}
+                  colSpan={5}
                   className="py-5 border-r border-gray-200 text-blue-700 bg-blue-50/30"
                 >
                   PATRONAL
                 </th>
                 <th
-                  colSpan={4}
+                  colSpan={5}
                   className="py-5 text-emerald-700 bg-emerald-50/30"
                 >
                   SEGURADOS
@@ -789,8 +850,9 @@ export default function RelatorioConsolidado({
                 </th>
                 <th className="py-3 px-4 min-w-[100px]">VALOR</th>
                 <th className="py-3 px-4 text-center">GUIA</th>
+                <th className="py-3 px-4 text-center">COMPROVANTE</th>
                 <th className="py-3 px-4 text-center border-r border-gray-200">
-                  COMPROVANTE
+                  OBS
                 </th>
 
                 <th className="py-3 px-4 whitespace-nowrap min-w-[140px]">
@@ -799,6 +861,7 @@ export default function RelatorioConsolidado({
                 <th className="py-3 px-4 min-w-[100px]">VALOR</th>
                 <th className="py-3 px-4 text-center">GUIA</th>
                 <th className="py-3 px-4 text-center">COMPROVANTE</th>
+                <th className="py-3 px-4 text-center">OBS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -816,16 +879,13 @@ export default function RelatorioConsolidado({
                       <div className="h-3.5 w-16 bg-gray-200/60 rounded" />
                     </td>
                     <td className="p-3 text-center">
-                      <div className="inline-flex gap-1 justify-center">
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                      </div>
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
                     </td>
                     <td className="p-3 text-center border-r border-gray-100">
-                      <div className="inline-flex gap-1 justify-center">
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                      </div>
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
                     </td>
                     {/* Segurados */}
                     <td className="p-3 px-4">
@@ -835,16 +895,13 @@ export default function RelatorioConsolidado({
                       <div className="h-3.5 w-16 bg-gray-200/60 rounded" />
                     </td>
                     <td className="p-3 text-center">
-                      <div className="inline-flex gap-1 justify-center">
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                      </div>
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
                     </td>
                     <td className="p-3 text-center">
-                      <div className="inline-flex gap-1 justify-center">
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-200/40 rounded-lg" />
-                      </div>
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="w-7 h-7 bg-gray-200/40 rounded-lg mx-auto" />
                     </td>
                   </tr>
                 ))
@@ -956,18 +1013,6 @@ export default function RelatorioConsolidado({
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
                             </button>
-                            <button
-                              onClick={() =>
-                                downloadDocument(
-                                  patData.urlGuia,
-                                  `guia-patronal-${dept.nome}.pdf`,
-                                )
-                              }
-                              className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
-                              title="Baixar"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
                             {(role === "master" || role === "admin") && (
                               <button
                                 onClick={() => handleDeleteGuia(patData.id)}
@@ -998,7 +1043,7 @@ export default function RelatorioConsolidado({
                           )
                         )}
                       </td>
-                      <td className="p-2 text-center border-r border-gray-200">
+                      <td className="p-2 text-center">
                         {patData?.urlComprovante ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
@@ -1090,6 +1135,29 @@ export default function RelatorioConsolidado({
                             <span className="text-[10px] text-gray-400 select-none">—</span>
                           )
                         )}
+                      </td>
+                      <td className="p-2 text-center border-r border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setObsModalConfig({
+                              isOpen: true,
+                              guiaId: patData?.id || null,
+                              deptId: dept.id,
+                              departamentoNome: dept.nome,
+                              tipo: "patronal",
+                              text: patData?.observacao || "",
+                            })
+                          }
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                            patData?.observacao
+                              ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                              : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                          }`}
+                          title={patData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
                       </td>
 
                       {/* SEGURADOS SECTION */}
@@ -1183,18 +1251,6 @@ export default function RelatorioConsolidado({
                               ) : (
                                 <Cloud className="w-4 h-4 text-indigo-500" />
                               )}
-                            </button>
-                            <button
-                              onClick={() =>
-                                downloadDocument(
-                                  segData.urlGuia,
-                                  `guia-segurado-${dept.nome}.pdf`,
-                                )
-                              }
-                              className="w-8 h-8 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all border border-gray-200"
-                              title="Baixar"
-                            >
-                              <Download className="w-4 h-4" />
                             </button>
                             {(role === "master" || role === "admin") && (
                               <button
@@ -1318,6 +1374,29 @@ export default function RelatorioConsolidado({
                             <span className="text-[10px] text-gray-400 select-none">—</span>
                           )
                         )}
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setObsModalConfig({
+                              isOpen: true,
+                              guiaId: segData?.id || null,
+                              deptId: dept.id,
+                              departamentoNome: dept.nome,
+                              tipo: "segurado",
+                              text: segData?.observacao || "",
+                            })
+                          }
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                            segData?.observacao
+                              ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                              : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                          }`}
+                          title={segData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -1800,6 +1879,89 @@ export default function RelatorioConsolidado({
                   </div>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Observation Dialog Modal */}
+      <AnimatePresence>
+        {obsModalConfig && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg p-8 relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-amber-500" />
+              
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <span className="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg text-[9px] font-black uppercase tracking-widest mb-2 border border-amber-200">
+                    Observação {obsModalConfig.tipo === "patronal" ? "Patronal" : "Segurado"}
+                  </span>
+                  <h3 className="text-xl font-black tracking-tight text-gray-900 leading-none">
+                    {obsModalConfig.departamentoNome}
+                  </h3>
+                  <p className="text-gray-400 font-bold text-[9px] uppercase tracking-widest mt-1">
+                    Referência: {new Date(2024, mes - 1).toLocaleString("pt-BR", { month: "long" })} / {ano}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setObsModalConfig(null)}
+                  className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 hover:text-gray-900"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+                    Texto da Observação
+                  </label>
+                  <textarea
+                    rows={5}
+                    disabled={role !== "master" && role !== "admin"}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none resize-none transition-all disabled:opacity-75"
+                    placeholder={(role === "master" || role === "admin") ? "Digite a observação para esta guia..." : "Sem observação preenchida."}
+                    value={obsModalConfig.text}
+                    onChange={(e) =>
+                      setObsModalConfig((prev) =>
+                        prev ? { ...prev, text: e.target.value } : null
+                      )
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setObsModalConfig(null)}
+                  className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  {(role === "master" || role === "admin") ? "Cancelar" : "Fechar"}
+                </button>
+                {(role === "master" || role === "admin") && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSaveObservation(
+                        obsModalConfig.guiaId,
+                        obsModalConfig.deptId,
+                        obsModalConfig.tipo,
+                        obsModalConfig.text,
+                      )
+                    }
+                    className="px-6 py-3.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
+                  >
+                    Salvar
+                  </button>
+                )}
+              </div>
             </motion.div>
           </div>
         )}
