@@ -95,10 +95,20 @@ export default function App() {
           // 4. cookies do navegador
           // 5. window.opener
           let verifier = localStorage.getItem('onedrive_code_verifier') || sessionStorage.getItem('onedrive_code_verifier');
+          let redirectUriFromState: string | undefined;
 
-          if (!verifier) {
-            const stateVal = searchParams.get('state') || hashParams.get('state') || '';
-            if (stateVal.startsWith('pkce_')) {
+          const stateVal = searchParams.get('state') || hashParams.get('state') || '';
+          if (stateVal) {
+            if (stateVal.includes('__r_')) {
+              const parts = stateVal.split('__r_');
+              if (!verifier && parts[0].startsWith('pkce_')) {
+                verifier = parts[0].replace('pkce_', '');
+              }
+              try {
+                const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                redirectUriFromState = atob(base64);
+              } catch (_) {}
+            } else if (!verifier && stateVal.startsWith('pkce_')) {
               verifier = stateVal.replace('pkce_', '');
             }
           }
@@ -119,8 +129,8 @@ export default function App() {
             }
           }
 
-          console.log("[OAuth Callback] Verifier encontrado?", !!verifier);
-          const result = await onedriveService.exchangeCodeForToken(code, verifier);
+          console.log("[OAuth Callback] Verifier encontrado?", !!verifier, "Redirect URI:", redirectUriFromState);
+          const result = await onedriveService.exchangeCodeForToken(code, verifier, redirectUriFromState);
           
           if (result.token) {
             localStorage.setItem('onedrive_token', result.token);

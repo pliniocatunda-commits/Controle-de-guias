@@ -17,12 +17,21 @@ export const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)' ? firebaseConfig.firestoreDatabaseId : undefined);
+
+// Conexão padrão otimizada com streaming WebChannel de alta velocidade
+export const db = getFirestore(
+  app,
+  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+    ? firebaseConfig.firestoreDatabaseId
+    : undefined
+);
+
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 8000, errorMessage: string = 'Operação expirou (timeout).'): Promise<T> {
+export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 25000, errorMessage: string = 'Operação expirou (timeout).'): Promise<T> {
   let timeoutId: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {

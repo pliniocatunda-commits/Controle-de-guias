@@ -69,9 +69,8 @@ service cloud.firestore {
 
     function isValidDepartamento(data) {
       return data.keys().hasAll(['nome', 'secretariaId']) &&
-             data.keys().size() >= 2 &&
-             data.nome is string && data.nome.size() <= 200 &&
-             isValidId(data.secretariaId);
+             data.nome is string && data.nome.size() > 0 && data.nome.size() <= 200 &&
+             data.secretariaId is string && data.secretariaId.size() > 0;
     }
 
     function isValidGuia(data) {
@@ -119,9 +118,9 @@ service cloud.firestore {
 
     match /departamentos/{deptId} {
       allow read: if isSignedIn();
-      allow create: if (isAdmin() || isSecretariaAdmin(incoming().secretariaId)) && isValidDepartamento(incoming());
-      allow update: if (isAdmin() || (isSecretariaAdmin(existing().secretariaId) && isSecretariaAdmin(incoming().secretariaId))) && isValidDepartamento(incoming());
-      allow delete: if isAdmin() || isSecretariaAdmin(existing().secretariaId);
+      allow create: if (isAdmin() || isMasterEmail() || isSecretariaAdmin(incoming().secretariaId)) && isValidDepartamento(incoming());
+      allow update: if (isAdmin() || isMasterEmail() || (isSecretariaAdmin(existing().secretariaId) && isSecretariaAdmin(incoming().secretariaId))) && isValidDepartamento(incoming());
+      allow delete: if isAdmin() || isMasterEmail() || isSecretariaAdmin(existing().secretariaId);
     }
 
     match /guias/{guiaId} {

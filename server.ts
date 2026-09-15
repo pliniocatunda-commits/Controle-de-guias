@@ -271,39 +271,57 @@ async function startServer() {
     return { clientId: config.clientId, clientSecret: config.clientSecret, tenant: config.tenant };
   };
 
-  const getRedirectUri = (req: express.Request) => {
-    // 1. Parâmetro explícito redirect_uri enviado pelo cliente frontend
-    if (req.query?.redirect_uri && typeof req.query.redirect_uri === "string" && req.query.redirect_uri.trim()) {
+  const getRedirectUri = (req: express.Request, preferredUri?: string) => {
+    // 0. Se um preferredUri válido foi passado explicitamente
+    if (preferredUri && typeof preferredUri === "string" && preferredUri.trim().startsWith("http")) {
+      return preferredUri.trim();
+    }
+
+    // 1. Se o state foi fornecido na URL e contém o redirect_uri codificado (__r_)
+    if (req.query?.state && typeof req.query.state === "string") {
+      try {
+        const stateStr = req.query.state;
+        if (stateStr.includes("__r_")) {
+          const encoded = stateStr.split("__r_")[1];
+          const decoded = Buffer.from(encoded, "base64url").toString("utf-8");
+          if (decoded && decoded.trim().startsWith("http")) {
+            return decoded.trim();
+          }
+        }
+      } catch (e) {
+        console.warn("[Backend OAuth] Erro ao extrair redirect_uri do state:", e);
+      }
+    }
+
+    // 2. Parâmetro explícito redirect_uri enviado pelo cliente frontend
+    if (req.query?.redirect_uri && typeof req.query.redirect_uri === "string" && req.query.redirect_uri.trim().startsWith("http")) {
       return req.query.redirect_uri.trim();
     }
 
-    // 2. Parâmetro explícito origin enviado pelo cliente frontend
-    if (req.query?.origin && typeof req.query.origin === "string" && req.query.origin.trim()) {
+    // 3. Parâmetro explícito origin enviado pelo cliente frontend
+    if (req.query?.origin && typeof req.query.origin === "string" && req.query.origin.trim().startsWith("http")) {
       const cleanOrigin = req.query.origin.trim().replace(/\/$/, "");
       return `${cleanOrigin}/auth/callback`;
     }
 
-    // 3. Origem detectada via cabeçalhos HTTP Origin ou Referer da sessão ativa do navegador
-    if (req.headers.origin && typeof req.headers.origin === "string") {
-      return `${req.headers.origin.replace(/\/$/, "")}/auth/callback`;
-    }
-    if (req.headers.referer && typeof req.headers.referer === "string") {
-      try {
-        const refUrl = new URL(req.headers.referer);
-        return `${refUrl.origin}/auth/callback`;
-      } catch (_) {}
-    }
-
     // 4. Detecção dinâmica via proxy reverso (Cloud Run / Nginx) do domínio atual
     const host = req.headers["x-forwarded-host"] || req.headers.host;
-    if (host && typeof host === "string") {
+    if (host && typeof host === "string" && !host.includes("login.microsoft") && !host.includes("microsoftonline") && !host.includes("live.com")) {
       const protocol = req.headers["x-forwarded-proto"] || (host.includes("localhost") ? "http" : "https");
       return `${protocol}://${host}/auth/callback`;
     }
 
-    // 5. Fallback para APP_URL de variáveis de ambiente apenas se não houver host detectado
+    // 5. Origem detectada via cabeçalhos HTTP Origin da sessão ativa (NUNCA de domínios externos da Microsoft)
+    if (req.headers.origin && typeof req.headers.origin === "string" && req.headers.origin.startsWith("http")) {
+      const origin = req.headers.origin.replace(/\/$/, "");
+      if (!origin.includes("microsoft") && !origin.includes("live.com") && !origin.includes("windowsazure")) {
+        return `${origin}/auth/callback`;
+      }
+    }
+
+    // 6. Fallback para APP_URL de variáveis de ambiente apenas se configurado
     let cleanAppUrl = process.env.APP_URL ? process.env.APP_URL.trim() : "";
-    if (cleanAppUrl) {
+    if (cleanAppUrl && cleanAppUrl.startsWith("http")) {
       if (cleanAppUrl.toLowerCase().endsWith("/auth/callback")) {
         cleanAppUrl = cleanAppUrl.substring(0, cleanAppUrl.length - "/auth/callback".length);
       }
@@ -390,39 +408,58 @@ async function startServer() {
       maxAge: 3600 * 1000, // 1 hora
     });
 
+    // Embute o redirect_uri no state para que no retorno do callback tenhamos exatamente a mesma URI utilizada
+    const state = `pkce_${verifier}__r_${Buffer.from(currentRedirectUri).toString("base64url")}`;
+
     const params = new URLSearchParams({
       client_id: trimmedClientId,
       response_type: "code",
       redirect_uri: currentRedirectUri,
       response_mode: "query",
       scope: "files.readwrite.all User.Read offline_access",
-      state: `pkce_${verifier}`,
+      state: state,
       prompt: "select_account",
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
 
     const authUrl = `https://login.microsoftonline.com/${creds.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
-    res.json({ url: authUrl });
+    res.json({ url: authUrl, redirectUri: currentRedirectUri });
   });
 
   // OAuth Callback
   app.get("/auth/callback", async (req, res) => {
-    const { code } = req.query;
+    const { code, state } = req.query;
 
     if (!code) {
       return res.status(400).send("Código de autorização ausente");
     }
 
-    // Recupera o code_verifier salvo no cookie ou no state (garantia contra bloqueio de cookies)
+    // Recupera o code_verifier e redirect_uri do cookie ou do state (garantia total contra cookies desabilitados)
     let codeVerifier = req.cookies.onedrive_code_verifier;
-    if (!codeVerifier && typeof req.query.state === "string" && req.query.state.startsWith("pkce_")) {
-      codeVerifier = req.query.state.replace("pkce_", "");
+    let redirectUriFromState = "";
+
+    if (typeof state === "string") {
+      if (state.includes("__r_")) {
+        const parts = state.split("__r_");
+        if (!codeVerifier && parts[0].startsWith("pkce_")) {
+          codeVerifier = parts[0].replace("pkce_", "");
+        }
+        try {
+          redirectUriFromState = Buffer.from(parts[1], "base64url").toString("utf-8");
+        } catch (_) {}
+      } else if (!codeVerifier && state.startsWith("pkce_")) {
+        codeVerifier = state.replace("pkce_", "");
+      }
     }
 
     try {
       const creds = await getOneDriveCredentials();
-      const currentRedirectUri = getRedirectUri(req);
+      const currentRedirectUri = (redirectUriFromState && redirectUriFromState.startsWith("http"))
+        ? redirectUriFromState
+        : getRedirectUri(req);
+
+      console.log("[Backend Callback] Trocando código por token com redirect_uri:", currentRedirectUri);
 
       const tokenRequestBody: Record<string, string> = {
         client_id: creds.clientId || "",

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, OperationType, handleFirestoreError, runWithTimeout } from '../lib/firebase';
-import { collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Departamento, Secretaria, Guia } from '../types';
 import { Building, Plus, ChevronRight, ArrowLeft, Search, Layers, Pencil, Trash2, Receipt, CheckCircle, Calculator, Cloud, Link as LinkIcon, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -18,10 +18,13 @@ interface DepartamentoListProps {
   initialSecretaria?: Secretaria;
 }
 
+// Cache em memória para departamentos por secretaria para navegação instantânea
+const cachedDeptsMap: Record<string, Departamento[]> = {};
+
 export default function DepartamentoList({ secretariaId, onBack, onSelectDepartamento, role, initialSecretaria }: DepartamentoListProps) {
-  const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
+  const [departamentos, setDepartamentos] = useState<Departamento[]>(() => cachedDeptsMap[secretariaId] || []);
   const [secretaria, setSecretaria] = useState<Secretaria | null>(initialSecretaria || null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cachedDeptsMap[secretariaId]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -79,14 +82,24 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
   const [totalPendente, setTotalPendente] = useState(0);
   const [guiasParaPagar, setGuiasParaPagar] = useState<Guia[]>([]);
 
-  const fetchDepartamentos = useCallback(async () => {
-    setLoading(true);
+  const secretariaRef = React.useRef(initialSecretaria || secretaria);
+  useEffect(() => {
+    if (initialSecretaria) {
+      secretariaRef.current = initialSecretaria;
+      setSecretaria(initialSecretaria);
+    }
+  }, [initialSecretaria]);
+
+  const fetchDepartamentos = useCallback(async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner || !cachedDeptsMap[secretariaId]) {
+      setLoading(true);
+    }
     setLoadError(null);
     try {
       // 1. Carrega dados da secretaria em paralelo se ainda não temos
-      const secPromise = (initialSecretaria || secretaria)
+      const secPromise = (secretariaRef.current)
         ? Promise.resolve(null)
-        : runWithTimeout(getDoc(doc(db, 'secretarias', secretariaId)), 6000).catch(err => {
+        : runWithTimeout(getDoc(doc(db, 'secretarias', secretariaId)), 15000).catch(err => {
             console.warn("Aviso ao carregar secretaria:", err);
             return null;
           });
@@ -94,7 +107,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       // 2. Tenta primeiro a consulta indexada direta por secretariaId
       const deptPromise = runWithTimeout(
         getDocs(query(collection(db, 'departamentos'), where('secretariaId', '==', secretariaId))),
-        7000
+        15000
       ).catch(err => {
         console.warn("Consulta direta indexada de departamentos falhou ou expirou:", err);
         return null;
@@ -103,18 +116,19 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       const [secSnap, deptSnap] = await Promise.all([secPromise, deptPromise]);
 
       if (secSnap && secSnap.exists()) {
-        setSecretaria({ id: secSnap.id, ...secSnap.data() } as Secretaria);
+        const secData = { id: secSnap.id, ...secSnap.data() } as Secretaria;
+        secretariaRef.current = secData;
+        setSecretaria(secData);
       }
 
       let list: Departamento[] = [];
 
-      if (deptSnap && !deptSnap.empty) {
+      if (deptSnap !== null) {
         list = deptSnap.docs.map(d => ({ id: d.id, ...d.data() } as Departamento));
       } else {
-        // Fallback robusto e instantâneo: busca toda a coleção de departamentos e filtra por secretariaId em memória
-        // Isso previne qualquer atraso de replicação, índices compostos em propagação ou divergência de tipos (string/number)
+        // Fallback robusto executado APENAS se a consulta direta der erro/timeout
         try {
-          const allDeptsSnap = await runWithTimeout(getDocs(collection(db, 'departamentos')), 6000);
+          const allDeptsSnap = await runWithTimeout(getDocs(collection(db, 'departamentos')), 15000);
           if (allDeptsSnap && !allDeptsSnap.empty) {
             list = allDeptsSnap.docs
               .map(d => ({ id: d.id, ...d.data() } as Departamento))
@@ -140,6 +154,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
         return (a.nome || '').localeCompare(b.nome || '');
       });
 
+      cachedDeptsMap[secretariaId] = list;
       setDepartamentos(list);
     } catch (error: any) {
       console.error("Erro ao buscar departamentos:", error);
@@ -147,14 +162,11 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     } finally {
       setLoading(false);
     }
-  }, [secretariaId, initialSecretaria]);
+  }, [secretariaId]);
 
   useEffect(() => {
-    if (initialSecretaria) {
-      setSecretaria(initialSecretaria);
-    }
     fetchDepartamentos();
-  }, [fetchDepartamentos, initialSecretaria]);
+  }, [fetchDepartamentos]);
 
   // Calcula guias pendentes da secretaria para o fechamento
   useEffect(() => {
@@ -219,40 +231,82 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
 
   const handleAdd = async () => {
     if (!newDeptName.trim() || isSubmitting) return;
+    const pendingName = newDeptName.trim();
+
+    // 1. Gera ID real do documento no Firestore no cliente instantaneamente (0ms)
+    const newDocRef = doc(collection(db, 'departamentos'));
+    const newDeptId = newDocRef.id;
+
+    // 2. Prepara o objeto do departamento
+    const newDept: Departamento = {
+      id: newDeptId,
+      nome: pendingName,
+      secretariaId,
+      createdAt: new Date()
+    };
+
+    // 3. Atualiza estado e cache local imediatamente
+    setDepartamentos(prev => {
+      const updated = [...prev, newDept].sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
+      cachedDeptsMap[secretariaId] = updated;
+      return updated;
+    });
+
+    // 4. Fecha modal e limpa campo na hora (interface 100% responsiva)
+    setShowAddModal(false);
+    setNewDeptName('');
+    showAlert("Sucesso", "Departamento cadastrado com sucesso!", "success");
+
+    // 5. Salva no Firestore em segundo plano
     try {
       setIsSubmitting(true);
-      await addDoc(collection(db, 'departamentos'), {
-        nome: newDeptName.trim(),
+      await setDoc(newDocRef, {
+        nome: pendingName,
         secretariaId,
         createdAt: serverTimestamp()
       });
-      setShowAddModal(false);
-      setNewDeptName('');
-      showAlert("Sucesso", "Departamento cadastrado com sucesso!", "success");
-      await fetchDepartamentos();
+      fetchDepartamentos(false).catch(() => {});
     } catch (error: any) {
-      console.error("Erro ao cadastrar departamento:", error);
-      showAlert("Erro", `Não foi possível cadastrar o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
+      console.error("Erro ao cadastrar departamento no Firestore:", error);
+      // Se falhar por permissão ou rede, remove o departamento otimista
+      setDepartamentos(prev => {
+        const reverted = prev.filter(d => d.id !== newDeptId);
+        cachedDeptsMap[secretariaId] = reverted;
+        return reverted;
+      });
+      showAlert("Erro", `Não foi possível salvar o departamento no banco (${error?.message || 'Verifique suas permissões'}).`, "danger");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleUpdate = async () => {
-    if (!editingDept || !editingDept.nome) return;
+    if (!editingDept || !editingDept.nome.trim()) return;
+    const targetId = editingDept.id;
+    const updatedName = editingDept.nome.trim();
+    const updatedFolderId = editingDept.onedriveFolderId || null;
+
+    // Atualização otimista imediata
+    setDepartamentos(prev => {
+      const updated = prev.map(d => d.id === targetId ? { ...d, nome: updatedName, onedriveFolderId: updatedFolderId } : d);
+      cachedDeptsMap[secretariaId] = updated;
+      return updated;
+    });
+    setEditingDept(null);
+    setShowOneDriveLinker(false);
+    showAlert("Sucesso", "Departamento atualizado com sucesso!", "success");
+
     try {
-      const deptRef = doc(db, 'departamentos', editingDept.id);
+      const deptRef = doc(db, 'departamentos', targetId);
       await updateDoc(deptRef, { 
-        nome: editingDept.nome,
-        onedriveFolderId: editingDept.onedriveFolderId || null
+        nome: updatedName,
+        onedriveFolderId: updatedFolderId
       });
-      setEditingDept(null);
-      setShowOneDriveLinker(false);
-      showAlert("Sucesso", "Departamento atualizado com sucesso!", "success");
-      await fetchDepartamentos();
+      fetchDepartamentos(false).catch(() => {});
     } catch (error: any) {
       console.error("Erro ao atualizar departamento:", error);
       showAlert("Erro", `Não foi possível atualizar o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
+      fetchDepartamentos(true);
     }
   };
 
@@ -263,13 +317,21 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       "Deseja realmente excluir este departamento? Isso afetará o acesso às guias vinculadas a ele.",
       "danger",
       async () => {
+        // Remoção otimista imediata
+        setDepartamentos(prev => {
+          const updated = prev.filter(d => d.id !== id);
+          cachedDeptsMap[secretariaId] = updated;
+          return updated;
+        });
+        showAlert("Sucesso", "Departamento excluído com sucesso!", "success");
+
         try {
           await deleteDoc(doc(db, 'departamentos', id));
-          showAlert("Sucesso", "Departamento excluído com sucesso!", "success");
-          await fetchDepartamentos();
+          fetchDepartamentos(false).catch(() => {});
         } catch (error: any) {
           console.error("Erro ao excluir departamento:", error);
           showAlert("Erro", `Não foi possível excluir o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
+          fetchDepartamentos(true);
         }
       }
     );

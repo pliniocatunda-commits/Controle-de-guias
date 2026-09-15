@@ -42,26 +42,54 @@ export default function RelatorioGuiasModal({
 }: RelatorioGuiasModalProps) {
   if (!isOpen) return null;
 
-  // Helpers to fetch filtered guides
+  // Helpers to fetch primary/normal guides and complementary groups
   const getGuiaData = (deptId: string, tipo: "patronal" | "segurado", regime: "capitalizado" | "financeiro") => {
     return guias.find(
       (g) =>
         g.departamentoId === deptId &&
         g.tipo === tipo &&
-        (g.regime || "capitalizado") === regime
+        (g.regime || "capitalizado") === regime &&
+        (!g.tipoFolha || g.tipoFolha === "normal") &&
+        !g.complementarId
     );
   };
 
-  // Calculations for both regimes
+  const getComplementarGroups = (deptId: string, regime: "capitalizado" | "financeiro") => {
+    const compGuias = guias.filter(
+      (g) =>
+        g.departamentoId === deptId &&
+        (g.regime || "capitalizado") === regime &&
+        (g.tipoFolha === "complementar" || Boolean(g.complementarId))
+    );
+    const map = new Map<string, { id: string; descricao: string; pat?: Guia; seg?: Guia }>();
+    compGuias.forEach((g) => {
+      const compId = g.complementarId || `comp_${g.id}`;
+      if (!map.has(compId)) {
+        map.set(compId, {
+          id: compId,
+          descricao: g.descricaoFolha || "Folha Complementar",
+        });
+      }
+      const entry = map.get(compId)!;
+      if (g.tipo === "patronal") entry.pat = g;
+      if (g.tipo === "segurado") entry.seg = g;
+    });
+    return Array.from(map.values());
+  };
+
+  // Calculations for both regimes: sums all guias (normal + complementares)
   const calculateTotals = (regime: "capitalizado" | "financeiro") => {
     let patronal = 0;
     let segurado = 0;
 
-    departamentos.forEach((dept) => {
-      const pat = getGuiaData(dept.id, "patronal", regime);
-      const seg = getGuiaData(dept.id, "segurado", regime);
-      patronal += pat?.valor || 0;
-      segurado += seg?.valor || 0;
+    guias.forEach((g) => {
+      if (
+        (g.regime || "capitalizado") === regime &&
+        departamentos.some((d) => d.id === g.departamentoId)
+      ) {
+        if (g.tipo === "patronal") patronal += (g.valor || 0);
+        if (g.tipo === "segurado") segurado += (g.valor || 0);
+      }
     });
 
     return {
@@ -90,18 +118,31 @@ export default function RelatorioGuiasModal({
 
     departamentos.forEach((dept) => {
       const sec = secretarias.find((s) => s.id === dept.secretariaId);
+      const secName = sec ? (sec.sigla || sec.nome) : "N/D";
+
+      // 1. Folha Normal
       const pat = getGuiaData(dept.id, "patronal", "capitalizado");
       const seg = getGuiaData(dept.id, "segurado", "capitalizado");
-
       const patVal = pat?.valor || 0;
       const segVal = seg?.valor || 0;
       const sumVal = patVal + segVal;
-
-      const secName = sec ? (sec.sigla || sec.nome) : "N/D";
       const patStatus = pat ? (pat.status === "pago" ? "Pago" : "Pendente") : "Pendente";
       const segStatus = seg ? (seg.status === "pago" ? "Pago" : "Pendente") : "Pendente";
 
       csv += `"${secName.replace(/"/g, '""')}";"${dept.nome.replace(/"/g, '""')}";"${pat?.identificacaoGrcp || "—"}";"${formatBRLValue(patVal)}";"${patStatus}";"${seg?.identificacaoGrcp || "—"}";"${formatBRLValue(segVal)}";"${segStatus}";"${formatBRLValue(sumVal)}"\n`;
+
+      // 2. Folhas Complementares
+      const compGroups = getComplementarGroups(dept.id, "capitalizado");
+      compGroups.forEach((comp) => {
+        const cPatVal = comp.pat?.valor || 0;
+        const cSegVal = comp.seg?.valor || 0;
+        const cSum = cPatVal + cSegVal;
+        const cPatStatus = comp.pat ? (comp.pat.status === "pago" ? "Pago" : "Pendente") : "Pendente";
+        const cSegStatus = comp.seg ? (comp.seg.status === "pago" ? "Pago" : "Pendente") : "Pendente";
+        const label = `${dept.nome} (${comp.descricao || "Folha Complementar"})`;
+
+        csv += `"${secName.replace(/"/g, '""')}";"${label.replace(/"/g, '""')}";"${comp.pat?.identificacaoGrcp || "—"}";"${formatBRLValue(cPatVal)}";"${cPatStatus}";"${comp.seg?.identificacaoGrcp || "—"}";"${formatBRLValue(cSegVal)}";"${cSegStatus}";"${formatBRLValue(cSum)}"\n`;
+      });
     });
 
     csv += `TOTAL REGIME CAPITALIZADO;;;"${formatBRLValue(totalsCap.patronal)}";;;"${formatBRLValue(totalsCap.segurado)}";;"${formatBRLValue(totalsCap.total)}"\n\n`;
@@ -112,18 +153,31 @@ export default function RelatorioGuiasModal({
 
     departamentos.forEach((dept) => {
       const sec = secretarias.find((s) => s.id === dept.secretariaId);
+      const secName = sec ? (sec.sigla || sec.nome) : "N/D";
+
+      // 1. Folha Normal
       const pat = getGuiaData(dept.id, "patronal", "financeiro");
       const seg = getGuiaData(dept.id, "segurado", "financeiro");
-
       const patVal = pat?.valor || 0;
       const segVal = seg?.valor || 0;
       const sumVal = patVal + segVal;
-
-      const secName = sec ? (sec.sigla || sec.nome) : "N/D";
       const patStatus = pat ? (pat.status === "pago" ? "Pago" : "Pendente") : "Pendente";
       const segStatus = seg ? (seg.status === "pago" ? "Pago" : "Pendente") : "Pendente";
 
       csv += `"${secName.replace(/"/g, '""')}";"${dept.nome.replace(/"/g, '""')}";"${pat?.identificacaoGrcp || "—"}";"${formatBRLValue(patVal)}";"${patStatus}";"${seg?.identificacaoGrcp || "—"}";"${formatBRLValue(segVal)}";"${segStatus}";"${formatBRLValue(sumVal)}"\n`;
+
+      // 2. Folhas Complementares
+      const compGroups = getComplementarGroups(dept.id, "financeiro");
+      compGroups.forEach((comp) => {
+        const cPatVal = comp.pat?.valor || 0;
+        const cSegVal = comp.seg?.valor || 0;
+        const cSum = cPatVal + cSegVal;
+        const cPatStatus = comp.pat ? (comp.pat.status === "pago" ? "Pago" : "Pendente") : "Pendente";
+        const cSegStatus = comp.seg ? (comp.seg.status === "pago" ? "Pago" : "Pendente") : "Pendente";
+        const label = `${dept.nome} (${comp.descricao || "Folha Complementar"})`;
+
+        csv += `"${secName.replace(/"/g, '""')}";"${label.replace(/"/g, '""')}";"${comp.pat?.identificacaoGrcp || "—"}";"${formatBRLValue(cPatVal)}";"${cPatStatus}";"${comp.seg?.identificacaoGrcp || "—"}";"${formatBRLValue(cSegVal)}";"${cSegStatus}";"${formatBRLValue(cSum)}"\n`;
+      });
     });
 
     csv += `TOTAL REGIME FINANCEIRO;;;"${formatBRLValue(totalsFin.patronal)}";;;"${formatBRLValue(totalsFin.segurado)}";;"${formatBRLValue(totalsFin.total)}"\n\n`;
@@ -439,13 +493,13 @@ export default function RelatorioGuiasModal({
     // Add Capitalizado table entries Grouped by Secretaria
     departamentos.forEach((dept) => {
       const sec = secretarias.find((s) => s.id === dept.secretariaId);
+      const secTag = sec ? `<span class="dept-badge">${sec.sigla || sec.nome}</span>` : "";
+
+      // 1. Folha Normal
       const pat = getGuiaData(dept.id, "patronal", "capitalizado");
       const seg = getGuiaData(dept.id, "segurado", "capitalizado");
-
       const patVal = pat?.valor || 0;
       const segVal = seg?.valor || 0;
-
-      const secTag = sec ? `<span class="dept-badge">${sec.sigla || sec.nome}</span>` : "";
       const patBadge = pat ? `<span class="status-badge ${pat.status === "pago" ? "status-pago" : "status-pendente"}">${pat.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
       const segBadge = seg ? `<span class="status-badge ${seg.status === "pago" ? "status-pago" : "status-pendente"}">${seg.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
 
@@ -460,6 +514,28 @@ export default function RelatorioGuiasModal({
           <td class="center">${segBadge}</td>
         </tr>
       `;
+
+      // 2. Folhas Complementares
+      const compGroups = getComplementarGroups(dept.id, "capitalizado");
+      compGroups.forEach((comp) => {
+        const cPatVal = comp.pat?.valor || 0;
+        const cSegVal = comp.seg?.valor || 0;
+        const cPatBadge = comp.pat ? `<span class="status-badge ${comp.pat.status === "pago" ? "status-pago" : "status-pendente"}">${comp.pat.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
+        const cSegBadge = comp.seg ? `<span class="status-badge ${comp.seg.status === "pago" ? "status-pago" : "status-pendente"}">${comp.seg.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
+        const compLabel = `${dept.nome} <span style="font-size: 8px; color: #4338ca; font-weight: bold; background: #e0e7ff; padding: 1px 4px; border-radius: 4px; margin-left: 4px;">(${comp.descricao || "Folha Complementar"})</span>`;
+
+        htmlContent += `
+          <tr style="background-color: #f8fafc;">
+            <td class="font-medium" style="padding-left: 20px;">↳ ${compLabel}</td>
+            <td>${comp.pat?.identificacaoGrcp || "—"}</td>
+            <td class="right font-medium">R$ ${formatBRLValue(cPatVal)}</td>
+            <td class="center">${cPatBadge}</td>
+            <td>${comp.seg?.identificacaoGrcp || "—"}</td>
+            <td class="right font-medium">R$ ${formatBRLValue(cSegVal)}</td>
+            <td class="center">${cSegBadge}</td>
+          </tr>
+        `;
+      });
     });
 
     htmlContent += `
@@ -499,13 +575,13 @@ export default function RelatorioGuiasModal({
     // Add Financeiro table entries
     departamentos.forEach((dept) => {
       const sec = secretarias.find((s) => s.id === dept.secretariaId);
+      const secTag = sec ? `<span class="dept-badge">${sec.sigla || sec.nome}</span>` : "";
+
+      // 1. Folha Normal
       const pat = getGuiaData(dept.id, "patronal", "financeiro");
       const seg = getGuiaData(dept.id, "segurado", "financeiro");
-
       const patVal = pat?.valor || 0;
       const segVal = seg?.valor || 0;
-
-      const secTag = sec ? `<span class="dept-badge">${sec.sigla || sec.nome}</span>` : "";
       const patBadge = pat ? `<span class="status-badge ${pat.status === "pago" ? "status-pago" : "status-pendente"}">${pat.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
       const segBadge = seg ? `<span class="status-badge ${seg.status === "pago" ? "status-pago" : "status-pendente"}">${seg.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
 
@@ -520,6 +596,28 @@ export default function RelatorioGuiasModal({
           <td class="center">${segBadge}</td>
         </tr>
       `;
+
+      // 2. Folhas Complementares
+      const compGroups = getComplementarGroups(dept.id, "financeiro");
+      compGroups.forEach((comp) => {
+        const cPatVal = comp.pat?.valor || 0;
+        const cSegVal = comp.seg?.valor || 0;
+        const cPatBadge = comp.pat ? `<span class="status-badge ${comp.pat.status === "pago" ? "status-pago" : "status-pendente"}">${comp.pat.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
+        const cSegBadge = comp.seg ? `<span class="status-badge ${comp.seg.status === "pago" ? "status-pago" : "status-pendente"}">${comp.seg.status === "pago" ? "Pago" : "Pendente"}</span>` : `<span class="status-badge status-pendente">Pendente</span>`;
+        const compLabel = `${dept.nome} <span style="font-size: 8px; color: #4338ca; font-weight: bold; background: #e0e7ff; padding: 1px 4px; border-radius: 4px; margin-left: 4px;">(${comp.descricao || "Folha Complementar"})</span>`;
+
+        htmlContent += `
+          <tr style="background-color: #f8fafc;">
+            <td class="font-medium" style="padding-left: 20px;">↳ ${compLabel}</td>
+            <td>${comp.pat?.identificacaoGrcp || "—"}</td>
+            <td class="right font-medium">R$ ${formatBRLValue(cPatVal)}</td>
+            <td class="center">${cPatBadge}</td>
+            <td>${comp.seg?.identificacaoGrcp || "—"}</td>
+            <td class="right font-medium">R$ ${formatBRLValue(cSegVal)}</td>
+            <td class="center">${cSegBadge}</td>
+          </tr>
+        `;
+      });
     });
 
     htmlContent += `
@@ -735,44 +833,84 @@ export default function RelatorioGuiasModal({
                       const sec = secretarias.find((s) => s.id === dept.secretariaId);
                       const pat = getGuiaData(dept.id, "patronal", "capitalizado");
                       const seg = getGuiaData(dept.id, "segurado", "capitalizado");
+                      const compGroups = getComplementarGroups(dept.id, "capitalizado");
 
                       return (
-                        <tr key={`cap-${dept.id}`} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-3 pl-6">
-                            {sec && (
-                              <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[8px] font-black uppercase mr-1.5">
-                                {sec.sigla || sec.nome}
-                              </span>
-                            )}
-                            <span className="font-extrabold text-slate-900">{dept.nome}</span>
-                          </td>
-                          <td className="p-3 text-slate-500 font-mono">{pat?.identificacaoGrcp || "—"}</td>
-                          <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(pat?.valor || 0)}</td>
-                          <td className="p-3 text-center">
-                            {pat ? (
-                              pat.status === "pago" ? (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                        <React.Fragment key={`cap-${dept.id}`}>
+                          <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="p-3 pl-6">
+                              {sec && (
+                                <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[8px] font-black uppercase mr-1.5">
+                                  {sec.sigla || sec.nome}
+                                </span>
+                              )}
+                              <span className="font-extrabold text-slate-900">{dept.nome}</span>
+                            </td>
+                            <td className="p-3 text-slate-500 font-mono">{pat?.identificacaoGrcp || "—"}</td>
+                            <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(pat?.valor || 0)}</td>
+                            <td className="p-3 text-center">
+                              {pat ? (
+                                pat.status === "pago" ? (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
+                                )
                               ) : (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
-                              )
-                            ) : (
-                              <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-500 font-mono">{seg?.identificacaoGrcp || "—"}</td>
-                          <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(seg?.valor || 0)}</td>
-                          <td className="p-3 text-center">
-                            {seg ? (
-                              seg.status === "pago" ? (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-500 font-mono">{seg?.identificacaoGrcp || "—"}</td>
+                            <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(seg?.valor || 0)}</td>
+                            <td className="p-3 text-center">
+                              {seg ? (
+                                seg.status === "pago" ? (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
+                                )
                               ) : (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
-                              )
-                            ) : (
-                              <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
-                            )}
-                          </td>
-                        </tr>
+                                <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
+                              )}
+                            </td>
+                          </tr>
+                          {compGroups.map((comp) => (
+                            <tr key={`cap-comp-${comp.id}`} className="bg-indigo-50/20 hover:bg-indigo-50/30 transition-colors border-l-2 border-indigo-300">
+                              <td className="p-2.5 pl-10">
+                                <span className="text-indigo-400 mr-1.5 font-bold">↳</span>
+                                <span className="font-bold text-slate-700 text-[10.5px]">{dept.nome}</span>
+                                <span className="ml-2 inline-block px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[7.5px] font-black uppercase">
+                                  {comp.descricao || "Complementar"}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-slate-500 font-mono text-[10.5px]">{comp.pat?.identificacaoGrcp || "—"}</td>
+                              <td className="p-2.5 text-right font-black text-slate-900 text-[10.5px]">R$ {formatBRLValue(comp.pat?.valor || 0)}</td>
+                              <td className="p-2.5 text-center">
+                                {comp.pat ? (
+                                  comp.pat.status === "pago" ? (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-1.5 py-0.5"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" /> Pago</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-amber-600 uppercase bg-amber-50 rounded-full px-1.5 py-0.5"><AlertCircle className="w-2.5 h-2.5 text-amber-500" /> Pendente</span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-350 text-[8.5px] uppercase tracking-wide">Pendente</span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-slate-500 font-mono text-[10.5px]">{comp.seg?.identificacaoGrcp || "—"}</td>
+                              <td className="p-2.5 text-right font-black text-slate-900 text-[10.5px]">R$ {formatBRLValue(comp.seg?.valor || 0)}</td>
+                              <td className="p-2.5 text-center">
+                                {comp.seg ? (
+                                  comp.seg.status === "pago" ? (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-1.5 py-0.5"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" /> Pago</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-amber-600 uppercase bg-amber-50 rounded-full px-1.5 py-0.5"><AlertCircle className="w-2.5 h-2.5 text-amber-500" /> Pendente</span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-350 text-[8.5px] uppercase tracking-wide">Pendente</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
                       );
                     })}
                     {/* Totals under capitalizado */}
@@ -824,44 +962,84 @@ export default function RelatorioGuiasModal({
                       const sec = secretarias.find((s) => s.id === dept.secretariaId);
                       const pat = getGuiaData(dept.id, "patronal", "financeiro");
                       const seg = getGuiaData(dept.id, "segurado", "financeiro");
+                      const compGroups = getComplementarGroups(dept.id, "financeiro");
 
                       return (
-                        <tr key={`fin-${dept.id}`} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-3 pl-6">
-                            {sec && (
-                              <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[8px] font-black uppercase mr-1.5">
-                                {sec.sigla || sec.nome}
-                              </span>
-                            )}
-                            <span className="font-extrabold text-slate-900">{dept.nome}</span>
-                          </td>
-                          <td className="p-3 text-slate-500 font-mono">{pat?.identificacaoGrcp || "—"}</td>
-                          <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(pat?.valor || 0)}</td>
-                          <td className="p-3 text-center">
-                            {pat ? (
-                              pat.status === "pago" ? (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                        <React.Fragment key={`fin-${dept.id}`}>
+                          <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="p-3 pl-6">
+                              {sec && (
+                                <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[8px] font-black uppercase mr-1.5">
+                                  {sec.sigla || sec.nome}
+                                </span>
+                              )}
+                              <span className="font-extrabold text-slate-900">{dept.nome}</span>
+                            </td>
+                            <td className="p-3 text-slate-500 font-mono">{pat?.identificacaoGrcp || "—"}</td>
+                            <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(pat?.valor || 0)}</td>
+                            <td className="p-3 text-center">
+                              {pat ? (
+                                pat.status === "pago" ? (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
+                                )
                               ) : (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
-                              )
-                            ) : (
-                              <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-500 font-mono">{seg?.identificacaoGrcp || "—"}</td>
-                          <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(seg?.valor || 0)}</td>
-                          <td className="p-3 text-center">
-                            {seg ? (
-                              seg.status === "pago" ? (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-500 font-mono">{seg?.identificacaoGrcp || "—"}</td>
+                            <td className="p-3 text-right font-black text-slate-950">R$ {formatBRLValue(seg?.valor || 0)}</td>
+                            <td className="p-3 text-center">
+                              {seg ? (
+                                seg.status === "pago" ? (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-2 py-0.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Pago</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
+                                )
                               ) : (
-                                <span className="inline-flex items-center gap-1 font-bold text-[8.5px] text-amber-600 uppercase bg-amber-50 rounded-full px-2 py-0.5"><AlertCircle className="w-3 h-3 text-amber-500" /> Pendente</span>
-                              )
-                            ) : (
-                              <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
-                            )}
-                          </td>
-                        </tr>
+                                <span className="text-slate-350 text-[9px] uppercase tracking-wide">Pendente</span>
+                              )}
+                            </td>
+                          </tr>
+                          {compGroups.map((comp) => (
+                            <tr key={`fin-comp-${comp.id}`} className="bg-teal-50/20 hover:bg-teal-50/30 transition-colors border-l-2 border-teal-400">
+                              <td className="p-2.5 pl-10">
+                                <span className="text-teal-500 mr-1.5 font-bold">↳</span>
+                                <span className="font-bold text-slate-700 text-[10.5px]">{dept.nome}</span>
+                                <span className="ml-2 inline-block px-1.5 py-0.5 bg-teal-100 text-teal-800 rounded text-[7.5px] font-black uppercase">
+                                  {comp.descricao || "Complementar"}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-slate-500 font-mono text-[10.5px]">{comp.pat?.identificacaoGrcp || "—"}</td>
+                              <td className="p-2.5 text-right font-black text-slate-900 text-[10.5px]">R$ {formatBRLValue(comp.pat?.valor || 0)}</td>
+                              <td className="p-2.5 text-center">
+                                {comp.pat ? (
+                                  comp.pat.status === "pago" ? (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-1.5 py-0.5"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" /> Pago</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-amber-600 uppercase bg-amber-50 rounded-full px-1.5 py-0.5"><AlertCircle className="w-2.5 h-2.5 text-amber-500" /> Pendente</span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-350 text-[8.5px] uppercase tracking-wide">Pendente</span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-slate-500 font-mono text-[10.5px]">{comp.seg?.identificacaoGrcp || "—"}</td>
+                              <td className="p-2.5 text-right font-black text-slate-900 text-[10.5px]">R$ {formatBRLValue(comp.seg?.valor || 0)}</td>
+                              <td className="p-2.5 text-center">
+                                {comp.seg ? (
+                                  comp.seg.status === "pago" ? (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-emerald-600 uppercase bg-emerald-50 rounded-full px-1.5 py-0.5"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" /> Pago</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 font-bold text-[8px] text-amber-600 uppercase bg-amber-50 rounded-full px-1.5 py-0.5"><AlertCircle className="w-2.5 h-2.5 text-amber-500" /> Pendente</span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-350 text-[8.5px] uppercase tracking-wide">Pendente</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
                       );
                     })}
                     {/* Totals under financeiro */}

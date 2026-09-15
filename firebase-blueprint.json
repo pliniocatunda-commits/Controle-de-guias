@@ -38,6 +38,9 @@
         "tipo": { "type": "string", "enum": ["patronal", "segurado"], "description": "Tipo da guia" },
         "identificacaoGrcp": { "type": "string", "description": "Código de identificação GRCP" },
         "observacao": { "type": "string", "description": "Observação opcional da guia" },
+        "tipoFolha": { "type": "string", "enum": ["normal", "complementar"], "description": "Tipo de folha (normal ou complementar)" },
+        "complementarId": { "type": "string", "description": "Identificador do grupo da folha complementar" },
+        "descricaoFolha": { "type": "string", "description": "Descrição ou nome da folha complementar" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["departamentoId", "mes", "ano", "valor", "vencimento", "status", "tipo"]

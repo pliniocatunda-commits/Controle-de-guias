@@ -263,12 +263,19 @@ export const onedriveService = {
       console.warn("Erro ao gerar Code Challenge usando Web Crypto.", e);
     }
 
+    let encodedRedirect = '';
+    try {
+      encodedRedirect = btoa(currentRedirectUri).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (_) {}
+
+    const stateParam = encodedRedirect ? `pkce_${codeVerifier}__r_${encodedRedirect}` : `pkce_${codeVerifier}`;
+
     const params = new URLSearchParams({
       client_id: config.clientId.trim(),
       response_type: "code",
       redirect_uri: currentRedirectUri,
       scope: "files.readwrite.all User.Read offline_access",
-      state: `pkce_${codeVerifier}`,
+      state: stateParam,
       prompt: "select_account",
     });
 
@@ -280,13 +287,16 @@ export const onedriveService = {
     return `https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/authorize?${params.toString()}`;
   },
 
-  async exchangeCodeForToken(code: string, codeVerifier: string | null): Promise<{ token: string; refreshToken?: string }> {
+  async exchangeCodeForToken(code: string, codeVerifier: string | null, customRedirectUri?: string): Promise<{ token: string; refreshToken?: string }> {
     const config = await getOneDriveConfig();
     if (!config || !config.clientId) {
       throw new Error('OneDrive não está configurado no banco de dados ou ambiente.');
     }
 
-    const currentRedirectUri = `${window.location.origin}/auth/callback`;
+    const currentRedirectUri = (customRedirectUri && customRedirectUri.startsWith('http'))
+      ? customRedirectUri
+      : `${window.location.origin}/auth/callback`;
+
     const params = new URLSearchParams({
       client_id: config.clientId.trim(),
       grant_type: 'authorization_code',

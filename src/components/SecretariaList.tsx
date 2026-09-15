@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Secretaria } from '../types';
 import { Building2, Plus, ChevronRight, Search, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import ModalConfirmacao from './ModalConfirmacao';
+
+// Cache em memória para transição e navegação instantânea entre telas
+let cachedSecretariasList: Secretaria[] | null = null;
 
 export default function SecretariaList({ 
   onSelect, 
@@ -15,15 +18,18 @@ export default function SecretariaList({
   onSelectDepartments?: (id: string, secretaria?: Secretaria) => void; 
   role?: string 
 }) {
-  const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [secretarias, setSecretarias] = useState<Secretaria[]>(() => cachedSecretariasList || []);
+  const [loading, setLoading] = useState(() => !cachedSecretariasList);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingSec, setEditingSec] = useState<Secretaria | null>(null);
   const [newSec, setNewSec] = useState({ nome: '', sigla: '' });
 
   const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean; id: string } | null>(null);
 
-  const fetchSecretarias = async () => {
+  const fetchSecretarias = async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner || !cachedSecretariasList) {
+      setLoading(true);
+    }
     try {
       const snapshot = await getDocs(collection(db, 'secretarias'));
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Secretaria));
@@ -65,9 +71,10 @@ export default function SecretariaList({
         normalizedList.splice(newIdxEsporte + 1, 0, articulacaoItem);
       }
 
+      cachedSecretariasList = normalizedList;
       setSecretarias(normalizedList);
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao carregar secretarias:", error);
     } finally {
       setLoading(false);
     }
@@ -78,41 +85,89 @@ export default function SecretariaList({
   }, []);
 
   const handleAdd = async () => {
-    if (!newSec.nome || !newSec.sigla) return;
+    if (!newSec.nome.trim() || !newSec.sigla.trim()) return;
+    const pendingName = newSec.nome.trim();
+    const pendingSigla = newSec.sigla.trim().toUpperCase();
+    setShowAddModal(false);
+    setNewSec({ nome: '', sigla: '' });
+
+    // 1. Gera ID real no cliente
+    const newDocRef = doc(collection(db, 'secretarias'));
+    const newSecId = newDocRef.id;
+
+    // 2. Adiciona à UI imediatamente (0ms)
+    const createdSec: Secretaria = {
+      id: newSecId,
+      nome: pendingName,
+      sigla: pendingSigla,
+      createdAt: new Date()
+    };
+    setSecretarias(prev => {
+      const updated = [...prev, createdSec];
+      cachedSecretariasList = updated;
+      return updated;
+    });
+
+    // 3. Persiste no banco em segundo plano
     try {
-      await addDoc(collection(db, 'secretarias'), {
-        ...newSec,
+      await setDoc(newDocRef, {
+        nome: pendingName,
+        sigla: pendingSigla,
         createdAt: serverTimestamp()
       });
-      setShowAddModal(false);
-      setNewSec({ nome: '', sigla: '' });
       fetchSecretarias();
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao adicionar secretaria:", error);
+      setSecretarias(prev => {
+        const reverted = prev.filter(s => s.id !== newSecId);
+        cachedSecretariasList = reverted;
+        return reverted;
+      });
+      fetchSecretarias(true);
     }
   };
 
   const handleUpdate = async () => {
-    if (!editingSec || !editingSec.nome || !editingSec.sigla) return;
+    if (!editingSec || !editingSec.nome.trim() || !editingSec.sigla.trim()) return;
+    const targetId = editingSec.id;
+    const updatedName = editingSec.nome.trim();
+    const updatedSigla = editingSec.sigla.trim().toUpperCase();
+    setEditingSec(null);
+
+    // Atualização otimista imediata
+    setSecretarias(prev => {
+      const updated = prev.map(s => s.id === targetId ? { ...s, nome: updatedName, sigla: updatedSigla } : s);
+      cachedSecretariasList = updated;
+      return updated;
+    });
+
     try {
-      const secRef = doc(db, 'secretarias', editingSec.id);
+      const secRef = doc(db, 'secretarias', targetId);
       await updateDoc(secRef, {
-        nome: editingSec.nome,
-        sigla: editingSec.sigla
+        nome: updatedName,
+        sigla: updatedSigla
       });
-      setEditingSec(null);
       fetchSecretarias();
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao atualizar secretaria:", error);
+      fetchSecretarias(true);
     }
   };
 
   const executeDelete = async (id: string) => {
+    // Remoção otimista imediata
+    setSecretarias(prev => {
+      const updated = prev.filter(s => s.id !== id);
+      cachedSecretariasList = updated;
+      return updated;
+    });
+
     try {
       await deleteDoc(doc(db, 'secretarias', id));
       fetchSecretarias();
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao excluir secretaria:", error);
+      fetchSecretarias(true);
     }
   };
 

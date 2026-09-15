@@ -33,6 +33,9 @@ export interface Guia {
   identificacaoGrcp?: string;
   regime?: string;
   observacao?: string;
+  tipoFolha?: 'normal' | 'complementar';
+  complementarId?: string;
+  descricaoFolha?: string;
   createdAt: any;
 }
 
