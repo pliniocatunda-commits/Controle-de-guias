@@ -6,7 +6,15 @@ import { Building2, Plus, ChevronRight, Search, Pencil, Trash2 } from 'lucide-re
 import { motion } from 'motion/react';
 import ModalConfirmacao from './ModalConfirmacao';
 
-export default function SecretariaList({ onSelect, onSelectDepartments, role }: { onSelect: (id: string) => void; onSelectDepartments?: (id: string) => void; role?: string }) {
+export default function SecretariaList({ 
+  onSelect, 
+  onSelectDepartments, 
+  role 
+}: { 
+  onSelect: (id: string, secretaria?: Secretaria) => void; 
+  onSelectDepartments?: (id: string, secretaria?: Secretaria) => void; 
+  role?: string 
+}) {
   const [secretarias, setSecretarias] = useState<Secretaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -151,7 +159,7 @@ export default function SecretariaList({ onSelect, onSelectDepartments, role }: 
               <motion.div 
                 key={sec.id}
                 whileHover={{ backgroundColor: '#f9fafb' }}
-                onClick={() => onSelect(sec.id)}
+                onClick={() => onSelect(sec.id, sec)}
                 className="flex items-center justify-between p-4 cursor-pointer group transition-colors"
               >
                 <div className="flex items-center gap-4">
@@ -167,7 +175,7 @@ export default function SecretariaList({ onSelect, onSelectDepartments, role }: 
                 <div className="flex items-center gap-2">
                   {onSelectDepartments && (
                     <button 
-                      onClick={(e) => { e.stopPropagation(); onSelectDepartments(sec.id); }}
+                      onClick={(e) => { e.stopPropagation(); onSelectDepartments(sec.id, sec); }}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-xl transition-all font-bold text-[11px] uppercase tracking-wider cursor-pointer active:scale-95 hover:shadow-sm mr-2 z-10"
                     >
                       <Building2 className="w-3.5 h-3.5 text-gray-500" /> Departamentos

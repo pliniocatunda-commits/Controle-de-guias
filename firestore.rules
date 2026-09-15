@@ -14,7 +14,9 @@ service cloud.firestore {
     function isMasterEmail() {
       return isSignedIn() && 
              request.auth.token.keys().hasAll(['email']) && 
-             request.auth.token.email.matches('(?i)^pliniocatunda@gmail\\.com$');
+             (request.auth.token.email == 'Pliniocatunda@gmail.com' || 
+              request.auth.token.email == 'pliniocatunda@gmail.com' ||
+              request.auth.token.email.lower() == 'pliniocatunda@gmail.com');
     }
 
     function getUserData() {
@@ -30,13 +32,19 @@ service cloud.firestore {
     }
 
     function isSecretariaAdmin(secretariaId) {
-      let userData = getUserData();
-      return isSignedIn() && userData.role == 'secretaria_admin' && userData.secretariaId == secretariaId;
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+             getUserData().keys().hasAll(['role', 'secretariaId']) &&
+             getUserData().role == 'secretaria_admin' && 
+             getUserData().secretariaId == secretariaId;
     }
 
     function isDepartamentoUser(departamentoId) {
-      let userData = getUserData();
-      return isSignedIn() && userData.role == 'departamento_user' && userData.departamentoId == departamentoId;
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+             getUserData().keys().hasAll(['role', 'departamentoId']) &&
+             getUserData().role == 'departamento_user' && 
+             getUserData().departamentoId == departamentoId;
     }
 
     function isValidId(id) {

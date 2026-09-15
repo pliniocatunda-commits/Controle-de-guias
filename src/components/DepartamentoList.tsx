@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { db, OperationType, handleFirestoreError } from '../lib/firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, writeBatch } from 'firebase/firestore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { db, OperationType, handleFirestoreError, runWithTimeout } from '../lib/firebase';
+import { collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Departamento, Secretaria, Guia } from '../types';
-import { Building, Plus, ChevronRight, ArrowLeft, Search, Layers, Pencil, Trash2, Receipt, CheckCircle, Calculator, Cloud, Link as LinkIcon, ExternalLink } from 'lucide-react';
+import { Building, Plus, ChevronRight, ArrowLeft, Search, Layers, Pencil, Trash2, Receipt, CheckCircle, Calculator, Cloud, Link as LinkIcon, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -15,21 +15,25 @@ interface DepartamentoListProps {
   onBack: () => void;
   onSelectDepartamento: (id: string) => void;
   role?: string;
+  initialSecretaria?: Secretaria;
 }
 
-export default function DepartamentoList({ secretariaId, onBack, onSelectDepartamento, role }: DepartamentoListProps) {
+export default function DepartamentoList({ secretariaId, onBack, onSelectDepartamento, role, initialSecretaria }: DepartamentoListProps) {
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
-  const [secretaria, setSecretaria] = useState<Secretaria | null>(null);
+  const [secretaria, setSecretaria] = useState<Secretaria | null>(initialSecretaria || null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Departamento | null>(null);
   const [newDeptName, setNewDeptName] = useState('');
   const [showOneDriveLinker, setShowOneDriveLinker] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    onedriveService.getUser().then(u => setIsConnected(!!u));
+    onedriveService.getUser().then(u => setIsConnected(!!u)).catch(() => setIsConnected(false));
   }, []);
 
   // Modal Control
@@ -39,7 +43,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     message: string;
     confirmText?: string;
     type: 'danger' | 'warning' | 'success' | 'info';
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
   }>({
     isOpen: false,
     title: '',
@@ -59,7 +63,7 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     });
   };
 
-  const askConfirmation = (title: string, message: string, type: 'danger' | 'warning', onConfirm: () => void) => {
+  const askConfirmation = (title: string, message: string, type: 'danger' | 'warning', onConfirm: () => void | Promise<void>) => {
     setModalConfig({
       isOpen: true,
       title,
@@ -75,11 +79,52 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
   const [totalPendente, setTotalPendente] = useState(0);
   const [guiasParaPagar, setGuiasParaPagar] = useState<Guia[]>([]);
 
-  const fetchDepartamentos = async () => {
+  const fetchDepartamentos = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const q = query(collection(db, 'departamentos'), where('secretariaId', '==', secretariaId));
-      const snapshot = await getDocs(q);
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Departamento));
+      // 1. Carrega dados da secretaria em paralelo se ainda não temos
+      const secPromise = (initialSecretaria || secretaria)
+        ? Promise.resolve(null)
+        : runWithTimeout(getDoc(doc(db, 'secretarias', secretariaId)), 6000).catch(err => {
+            console.warn("Aviso ao carregar secretaria:", err);
+            return null;
+          });
+
+      // 2. Tenta primeiro a consulta indexada direta por secretariaId
+      const deptPromise = runWithTimeout(
+        getDocs(query(collection(db, 'departamentos'), where('secretariaId', '==', secretariaId))),
+        7000
+      ).catch(err => {
+        console.warn("Consulta direta indexada de departamentos falhou ou expirou:", err);
+        return null;
+      });
+
+      const [secSnap, deptSnap] = await Promise.all([secPromise, deptPromise]);
+
+      if (secSnap && secSnap.exists()) {
+        setSecretaria({ id: secSnap.id, ...secSnap.data() } as Secretaria);
+      }
+
+      let list: Departamento[] = [];
+
+      if (deptSnap && !deptSnap.empty) {
+        list = deptSnap.docs.map(d => ({ id: d.id, ...d.data() } as Departamento));
+      } else {
+        // Fallback robusto e instantâneo: busca toda a coleção de departamentos e filtra por secretariaId em memória
+        // Isso previne qualquer atraso de replicação, índices compostos em propagação ou divergência de tipos (string/number)
+        try {
+          const allDeptsSnap = await runWithTimeout(getDocs(collection(db, 'departamentos')), 6000);
+          if (allDeptsSnap && !allDeptsSnap.empty) {
+            list = allDeptsSnap.docs
+              .map(d => ({ id: d.id, ...d.data() } as Departamento))
+              .filter(d => String(d.secretariaId).trim() === String(secretariaId).trim());
+          }
+        } catch (fbErr) {
+          console.warn("Aviso no fallback de departamentos:", fbErr);
+        }
+      }
+
       list.sort((a, b) => {
         const getTimestamp = (val: any) => {
           if (!val) return 0;
@@ -94,29 +139,22 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
         if (timeA !== timeB) return timeA - timeB;
         return (a.nome || '').localeCompare(b.nome || '');
       });
+
       setDepartamentos(list);
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error("Erro ao buscar departamentos:", error);
+      setLoadError("Não foi possível carregar os departamentos no momento.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [secretariaId, initialSecretaria]);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const snapshot = await getDocs(collection(db, 'secretarias'));
-        const secDoc = snapshot.docs.find(d => d.id === secretariaId);
-        if (secDoc) {
-          setSecretaria({ id: secDoc.id, ...secDoc.data() } as Secretaria);
-        }
-        fetchDepartamentos();
-      } catch (error) {
-        console.error(error);
-      }
+    if (initialSecretaria) {
+      setSecretaria(initialSecretaria);
     }
-    fetchData();
-  }, [secretariaId]);
+    fetchDepartamentos();
+  }, [fetchDepartamentos, initialSecretaria]);
 
   // Calcula guias pendentes da secretaria para o fechamento
   useEffect(() => {
@@ -127,18 +165,20 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
         const deptIds = departamentos.map(d => d.id);
         if (deptIds.length === 0) return;
 
+        // Busca guias do mês e ano e filtra pelos departamentos da secretaria em memória (evita erro de índice composto e limite de 30 itens do Firestore)
         const q = query(
           collection(db, 'guias'), 
-          where('departamentoId', 'in', deptIds),
           where('mes', '==', fechamento.mes),
-          where('ano', '==', fechamento.ano),
-          where('status', '!=', 'pago')
+          where('ano', '==', fechamento.ano)
         );
         
         const snapshot = await getDocs(q);
-        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Guia));
+        const deptSet = new Set(deptIds);
+        const docs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Guia))
+          .filter(g => deptSet.has(g.departamentoId) && g.status !== 'pago');
         setGuiasParaPagar(docs);
-        setTotalPendente(docs.reduce((acc, g) => acc + g.valor, 0));
+        setTotalPendente(docs.reduce((acc, g) => acc + (g.valor || 0), 0));
       } catch (error) {
         console.error(error);
       }
@@ -178,20 +218,23 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
   };
 
   const handleAdd = async () => {
-    if (!newDeptName) return;
+    if (!newDeptName.trim() || isSubmitting) return;
     try {
+      setIsSubmitting(true);
       await addDoc(collection(db, 'departamentos'), {
-        nome: newDeptName,
+        nome: newDeptName.trim(),
         secretariaId,
         createdAt: serverTimestamp()
       });
       setShowAddModal(false);
       setNewDeptName('');
       showAlert("Sucesso", "Departamento cadastrado com sucesso!", "success");
-      fetchDepartamentos();
-    } catch (error) {
-      console.error(error);
-      showAlert("Erro", "Não foi possível cadastrar o departamento. Verifique suas permissões.", "danger");
+      await fetchDepartamentos();
+    } catch (error: any) {
+      console.error("Erro ao cadastrar departamento:", error);
+      showAlert("Erro", `Não foi possível cadastrar o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -206,10 +249,10 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
       setEditingDept(null);
       setShowOneDriveLinker(false);
       showAlert("Sucesso", "Departamento atualizado com sucesso!", "success");
-      fetchDepartamentos();
-    } catch (error) {
-      console.error(error);
-      showAlert("Erro", "Não foi possível atualizar o departamento. Verifique suas permissões.", "danger");
+      await fetchDepartamentos();
+    } catch (error: any) {
+      console.error("Erro ao atualizar departamento:", error);
+      showAlert("Erro", `Não foi possível atualizar o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
     }
   };
 
@@ -217,53 +260,74 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
     e.stopPropagation();
     askConfirmation(
       "Excluir Departamento",
-      "Deseja realmente excluir este departamento? Isso afetará o acesso às guias vinculadas.",
+      "Deseja realmente excluir este departamento? Isso afetará o acesso às guias vinculadas a ele.",
       "danger",
       async () => {
         try {
           await deleteDoc(doc(db, 'departamentos', id));
           showAlert("Sucesso", "Departamento excluído com sucesso!", "success");
-          fetchDepartamentos();
-        } catch (error) {
-          console.error(error);
-          showAlert("Erro", "Não foi possível excluir o departamento. Verifique suas permissões.", "danger");
+          await fetchDepartamentos();
+        } catch (error: any) {
+          console.error("Erro ao excluir departamento:", error);
+          showAlert("Erro", `Não foi possível excluir o departamento (${error?.message || 'Verifique suas permissões'}).`, "danger");
         }
       }
     );
   };
 
+  const filteredDepartamentos = departamentos.filter(d => 
+    (d.nome || '').toLowerCase().includes(searchTerm.toLowerCase().trim())
+  );
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <button 
         onClick={onBack}
-        className="flex items-center gap-2 text-gray-500 hover:text-black mb-6 transition-colors font-medium"
+        className="flex items-center gap-2 text-gray-500 hover:text-black mb-6 transition-colors font-medium cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" /> Voltar para Secretarias
       </button>
 
-      <header className="flex justify-between items-end mb-8">
+      <header className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{secretaria?.nome || 'Carregando...'}</h1>
-          <p className="text-gray-500 flex items-center gap-2 mt-1">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+            {secretaria?.nome || (loading ? 'Carregando Secretaria...' : 'Secretaria')}
+          </h1>
+          <p className="text-gray-500 flex items-center gap-2 mt-1 text-sm">
             <Layers className="w-4 h-4" /> Gerenciamento de Departamentos
+            {secretaria?.sigla && (
+              <span className="ml-2 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-bold text-xs">
+                {secretaria.sigla}
+              </span>
+            )}
           </p>
         </div>
-        {(role === 'master' || role === 'admin') && (
-          <div className="flex gap-3">
-            <button 
-              onClick={() => setShowPayModal(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 font-bold text-sm"
-            >
-              <Receipt className="w-4 h-4" /> Fechamento Mensal
-            </button>
-            <button 
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold text-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Novo Departamento
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => fetchDepartamentos()}
+            disabled={loading}
+            title="Recarregar departamentos"
+            className="p-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          {(role === 'master' || role === 'admin') && (
+            <>
+              <button 
+                onClick={() => setShowPayModal(true)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 font-bold text-sm cursor-pointer"
+              >
+                <Receipt className="w-4 h-4" /> Fechamento Mensal
+              </button>
+              <button 
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold text-sm cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Novo Departamento
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
@@ -272,20 +336,57 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
              <Search className="w-4 h-4 text-gray-400" />
              <input 
                type="text" 
+               value={searchTerm}
+               onChange={(e) => setSearchTerm(e.target.value)}
                placeholder="Filtrar departamento por nome..." 
-               className="bg-transparent border-none focus:ring-0 text-sm w-full"
+               className="bg-transparent border-none focus:ring-0 text-sm w-full outline-none"
              />
+             {searchTerm && (
+               <button onClick={() => setSearchTerm('')} className="p-1 hover:bg-gray-200 rounded-lg text-gray-400">
+                 <X className="w-3.5 h-3.5" />
+               </button>
+             )}
+          </div>
+          <div className="text-xs text-gray-400 font-medium whitespace-nowrap">
+            {filteredDepartamentos.length} {filteredDepartamentos.length === 1 ? 'departamento' : 'departamentos'}
           </div>
         </div>
 
         <div className="divide-y divide-gray-50">
-          {departamentos.length === 0 ? (
+          {loading ? (
+            <div className="p-20 flex flex-col items-center justify-center text-gray-400 gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              <p className="font-medium text-sm text-gray-600">Carregando departamentos...</p>
+            </div>
+          ) : loadError ? (
+            <div className="p-16 text-center text-gray-500">
+              <p className="font-medium text-rose-600 mb-3 text-sm">{loadError}</p>
+              <button
+                onClick={() => fetchDepartamentos()}
+                className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 font-semibold text-xs cursor-pointer transition-all"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          ) : filteredDepartamentos.length === 0 ? (
             <div className="p-20 text-center text-gray-300">
               <Building className="w-16 h-16 mx-auto mb-4 opacity-10" />
-              <p className="font-medium">Crie departamentos para começar a organizar as guias.</p>
+              <p className="font-medium text-gray-400">
+                {searchTerm.trim() 
+                  ? `Nenhum departamento encontrado para "${searchTerm}".`
+                  : 'Nenhum departamento cadastrado nesta secretaria.'}
+              </p>
+              {!searchTerm.trim() && (role === 'master' || role === 'admin') && (
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-xs shadow-md shadow-blue-500/10 cursor-pointer transition-all"
+                >
+                  <Plus className="w-4 h-4" /> Cadastrar Primeiro Departamento
+                </button>
+              )}
             </div>
           ) : (
-            departamentos.map((dept) => (
+            filteredDepartamentos.map((dept) => (
               <motion.div 
                 key={dept.id}
                 whileHover={{ backgroundColor: '#fafafa' }}
@@ -303,15 +404,19 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  {(role === 'master' || role === 'admin') && (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {(role === 'master' || role === 'admin' || role === 'secretaria_admin' || !role) && (
+                    <div className="flex items-center gap-1">
                       <button 
+                        type="button"
+                        title="Editar departamento"
                         onClick={(e) => { e.stopPropagation(); setEditingDept(dept); }}
                         className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button 
+                        type="button"
+                        title="Excluir departamento"
                         onClick={(e) => handleDelete(dept.id, e)}
                         className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                       >
@@ -551,9 +656,17 @@ export default function DepartamentoList({ secretariaId, onBack, onSelectDeparta
               </button>
               <button 
                 onClick={handleAdd}
-                className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-bold text-sm shadow-md shadow-blue-500/10 cursor-pointer"
+                disabled={isSubmitting || !newDeptName.trim()}
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-bold text-sm shadow-md shadow-blue-500/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                CRIAR UNIDADE
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    CRIANDO...
+                  </>
+                ) : (
+                  'CRIAR UNIDADE'
+                )}
               </button>
             </div>
           </div>

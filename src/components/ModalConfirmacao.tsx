@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertCircle, CheckCircle, X, HelpCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, HelpCircle, Loader2 } from 'lucide-react';
 
 interface ModalConfirmacaoProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   title: string;
   message: string;
   confirmText?: string;
@@ -23,6 +23,8 @@ export default function ModalConfirmacao({
   cancelText = 'Cancelar',
   type = 'info'
 }: ModalConfirmacaoProps) {
+  const [loading, setLoading] = useState(false);
+
   const themes = {
     danger: {
       icon: <AlertCircle className="w-8 h-8 text-rose-500" />,
@@ -51,6 +53,19 @@ export default function ModalConfirmacao({
   };
 
   const theme = themes[type];
+  const isQuestion = type === 'danger' || type === 'warning';
+
+  const handleConfirm = async () => {
+    try {
+      setLoading(true);
+      await onConfirm();
+      onClose();
+    } catch (err) {
+      console.error("Erro ao confirmar:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -60,7 +75,7 @@ export default function ModalConfirmacao({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={loading ? undefined : onClose}
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
           <motion.div 
@@ -81,20 +96,28 @@ export default function ModalConfirmacao({
             
             <div className="p-8 flex flex-col gap-3">
               <button 
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
-                className={`w-full py-4 rounded-2xl text-white font-bold text-sm tracking-widest uppercase transition-all shadow-lg active:scale-95 ${theme.button}`}
+                onClick={handleConfirm}
+                disabled={loading}
+                className={`w-full py-4 rounded-2xl text-white font-bold text-sm tracking-widest uppercase transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${theme.button}`}
               >
-                {confirmText}
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  confirmText
+                )}
               </button>
-              <button 
-                onClick={onClose}
-                className="w-full py-4 text-gray-400 font-bold text-[10px] uppercase tracking-widest hover:text-black transition-colors"
-              >
-                {cancelText}
-              </button>
+              {isQuestion && (
+                <button 
+                  onClick={onClose}
+                  disabled={loading}
+                  className="w-full py-4 text-gray-400 font-bold text-[10px] uppercase tracking-widest hover:text-black transition-colors disabled:opacity-30"
+                >
+                  {cancelText}
+                </button>
+              )}
             </div>
           </motion.div>
         </div>

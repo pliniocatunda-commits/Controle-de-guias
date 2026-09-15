@@ -82,21 +82,20 @@ export default function Dashboard() {
     async function fetchData() {
       setLoading(true);
       try {
-        // Fetch secretarias
-        const secsRef = collection(db, 'secretarias');
-        const secsSnapshot = await getDocs(secsRef);
+        // Fetch all collections in parallel for maximum performance
+        const [secsSnapshot, deptsSnapshot, guiasSnapshot, compSnapshot] = await Promise.all([
+          getDocs(collection(db, 'secretarias')),
+          getDocs(collection(db, 'departamentos')),
+          getDocs(collection(db, 'guias')),
+          getDocs(collection(db, 'comprovantes'))
+        ]);
+
         const secsData = secsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Secretaria);
         setSecretarias(secsData);
 
-        // Fetch departamentos
-        const deptsRef = collection(db, 'departamentos');
-        const deptsSnapshot = await getDocs(deptsRef);
         const deptsData = deptsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Departamento);
         setDepartamentos(deptsData);
 
-        // Fetch all guias
-        const guiasRef = collection(db, 'guias');
-        const guiasSnapshot = await getDocs(guiasRef);
         const guiasData = guiasSnapshot.docs.map(d => {
           const data = d.data();
           const valorNum = normalizeValue(data.valor);
@@ -111,9 +110,6 @@ export default function Dashboard() {
         });
         setAllGuias(guiasData);
 
-        // Fetch all comprovantes
-        const compRef = collection(db, 'comprovantes');
-        const compSnapshot = await getDocs(compRef);
         const guiasMap = new Map(guiasData.map(g => [g.id, g]));
         
         const compData = compSnapshot.docs.map(d => {

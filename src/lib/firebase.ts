@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import appletFirebaseConfig from '../../firebase-applet-config.json';
 
@@ -19,15 +19,10 @@ export const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)' ? firebaseConfig.firestoreDatabaseId : undefined);
-
-// Enable offline persistence for instant reads and caching
-enableIndexedDbPersistence(db).catch((err) => {
-  console.warn("Firestore offline persistence could not be enabled:", err);
-});
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000, errorMessage: string = 'Operação expirou (timeout).'): Promise<T> {
+export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 8000, errorMessage: string = 'Operação expirou (timeout).'): Promise<T> {
   let timeoutId: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -38,17 +33,6 @@ export function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000,
     if (timeoutId) clearTimeout(timeoutId);
   });
 }
-
-async function testConnection() {
-  try {
-    await runWithTimeout(getDocFromServer(doc(db, 'test', 'connection')), 15000);
-    console.log('Firebase connection successful');
-  } catch (error) {
-    console.warn("Firebase test connection warning/error:", error);
-  }
-}
-
-testConnection();
 
 export enum OperationType {
   CREATE = 'create',

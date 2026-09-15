@@ -154,14 +154,16 @@ export default function OneDriveConnector({ role }: Props) {
     }
   };
 
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
   const getRedirectUri = () => {
     return `${window.location.origin}/auth/callback`;
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(getRedirectUri());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyToClipboard = (text: string, key = 'current') => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2500);
   };
 
   if (loading) return (
@@ -203,7 +205,7 @@ export default function OneDriveConnector({ role }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
-          {role === 'master' && (
+          {(role === 'master' || role === 'admin' || !user || !!error) && (
             <button
               onClick={() => setShowHelp(!showHelp)}
               className={`p-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold ${
@@ -236,11 +238,25 @@ export default function OneDriveConnector({ role }: Props) {
       </div>
 
       {error && (
-        <div className="mt-4 p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 flex items-start gap-2.5 leading-relaxed">
-          <AlertCircle size={16} className="text-rose-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold mb-1">Falha de Autenticação:</p>
-            <p>{error}</p>
+        <div className="mt-4 p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-2 leading-relaxed">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle size={18} className="text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold text-rose-900 text-sm">Falha na Autenticação com a Microsoft:</p>
+              <p className="font-mono text-[11px] bg-rose-100/70 p-2 rounded border border-rose-200">{error}</p>
+            </div>
+          </div>
+          
+          <div className="pt-2 border-t border-rose-200/60 flex items-center justify-between">
+            <p className="text-[11px] text-rose-700">
+              💡 Para corrigir o erro de <code className="font-bold">redirect_uri</code>, registre a URL do seu ambiente atual no portal Azure AD.
+            </p>
+            <button
+              onClick={() => setShowHelp(true)}
+              className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shrink-0 transition-colors"
+            >
+              Ver Como Corrigir no Azure
+            </button>
           </div>
         </div>
       )}
@@ -412,22 +428,96 @@ export default function OneDriveConnector({ role }: Props) {
             </ol>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-4">
             <div className="space-y-2">
-              <span className="block font-bold text-gray-400 uppercase tracking-widest text-[9px]">1. URL de Redirecionamento Recomendada</span>
-              <p className="text-gray-500 text-[11px]">Você deve adicionar este link preferencialmente sob a plataforma <strong>SPA (Aplicativo de Página Única)</strong> se estiver no Vercel (ou <strong>Web</strong> se estiver rodando o servidor backend próprio) nas configurações de autenticação do seu App no Azure:</p>
-              
-              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 p-2 rounded-lg font-mono text-[10px] text-gray-700">
-                <span className="truncate flex-1">{getRedirectUri()}</span>
-                <button 
-                  onClick={copyToClipboard}
-                  className="p-1.5 bg-white hover:bg-gray-100 border border-gray-200 rounded text-gray-500 hover:text-black transition-colors"
-                  title="Copiar URL"
-                >
-                  {copied ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />}
-                </button>
+              <span className="block font-bold text-gray-700 uppercase tracking-widest text-[10px]">
+                1. URIs de Redirecionamento para Registrar no Azure AD
+              </span>
+              <p className="text-gray-600 text-[11px] leading-relaxed">
+                No portal do Azure (aba <strong>Autenticação &gt; URIs de Redirecionamento</strong>), você pode cadastrar <strong>todas</strong> as URLs abaixo simultaneamente. Assim o login funcionará tanto na publicação compartilhada de teste quanto no Studio de desenvolvimento!
+              </p>
+
+              <div className="space-y-2 mt-2">
+                {/* Current URL */}
+                <div className="bg-blue-50/70 border border-blue-200 p-2.5 rounded-lg space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wide">
+                      📍 URL do seu ambiente atual ({window.location.hostname.includes('ais-pre') ? 'Publicação de Teste' : window.location.hostname.includes('ais-dev') ? 'Studio de Desenvolvimento' : 'Domínio Atual'}):
+                    </span>
+                    {copiedKey === 'current' && <span className="text-[10px] text-emerald-600 font-bold">Copiado!</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-mono text-[11px] text-blue-950 font-bold">
+                    <span className="truncate flex-1 select-all">{getRedirectUri()}</span>
+                    <button 
+                      onClick={() => copyToClipboard(getRedirectUri(), 'current')}
+                      className="p-1.5 bg-white hover:bg-blue-100 border border-blue-300 rounded text-blue-700 hover:text-blue-950 transition-colors shadow-xs"
+                      title="Copiar URL atual"
+                    >
+                      {copiedKey === 'current' ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Shared Test URL */}
+                <div className="bg-slate-50 border border-slate-200 p-2 rounded-lg space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wide">
+                      🌐 Publicação de Teste (ais-pre):
+                    </span>
+                    {copiedKey === 'pre' && <span className="text-[9px] text-emerald-600 font-bold">Copiado!</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] text-slate-800">
+                    <span className="truncate flex-1 select-all">https://ais-pre-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app/auth/callback</span>
+                    <button 
+                      onClick={() => copyToClipboard('https://ais-pre-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app/auth/callback', 'pre')}
+                      className="p-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-slate-600 transition-colors"
+                      title="Copiar URL da publicação"
+                    >
+                      {copiedKey === 'pre' ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Vercel Production URL */}
+                <div className="bg-slate-50 border border-slate-200 p-2 rounded-lg space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wide">
+                      ⚡ Vercel (controle-de-guias.vercel.app):
+                    </span>
+                    {copiedKey === 'vercel' && <span className="text-[9px] text-emerald-600 font-bold">Copiado!</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] text-slate-800">
+                    <span className="truncate flex-1 select-all">https://controle-de-guias.vercel.app/auth/callback</span>
+                    <button 
+                      onClick={() => copyToClipboard('https://controle-de-guias.vercel.app/auth/callback', 'vercel')}
+                      className="p-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-slate-600 transition-colors"
+                      title="Copiar URL do Vercel"
+                    >
+                      {copiedKey === 'vercel' ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Studio Dev URL */}
+                <div className="bg-slate-50 border border-slate-200 p-2 rounded-lg space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wide">
+                      💻 Studio Dev Preview (ais-dev):
+                    </span>
+                    {copiedKey === 'dev' && <span className="text-[9px] text-emerald-600 font-bold">Copiado!</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] text-slate-800">
+                    <span className="truncate flex-1 select-all">https://ais-dev-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app/auth/callback</span>
+                    <button 
+                      onClick={() => copyToClipboard('https://ais-dev-p6vyxxn7s22aps5bevzc2w-534607352231.us-east1.run.app/auth/callback', 'dev')}
+                      className="p-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-slate-600 transition-colors"
+                      title="Copiar URL do Studio dev"
+                    >
+                      {copiedKey === 'dev' ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                </div>
               </div>
-              {copied && <p className="text-[10px] text-emerald-600 font-semibold">Copiado para a área de transferência com sucesso!</p>}
             </div>
 
             <div className="space-y-2">

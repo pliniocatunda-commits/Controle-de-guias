@@ -84,7 +84,7 @@ async function startServer() {
 
     try {
       console.log("[Backend REST] Buscando configuração no Firestore (autenticado)...");
-      const fsRes = await fetchWithTimeout(url, {}, 5000); // tempo limite agressivo de 5s para não travar a UI
+      const fsRes = await fetchWithTimeout(url, {}, 2000); // tempo limite ágil de 2s para não atrasar respostas do backend
       if (fsRes.ok) {
         const fsData = await fsRes.json();
         const fields = fsData.fields || {};
@@ -272,18 +272,45 @@ async function startServer() {
   };
 
   const getRedirectUri = (req: express.Request) => {
+    // 1. Parâmetro explícito redirect_uri enviado pelo cliente frontend
+    if (req.query?.redirect_uri && typeof req.query.redirect_uri === "string" && req.query.redirect_uri.trim()) {
+      return req.query.redirect_uri.trim();
+    }
+
+    // 2. Parâmetro explícito origin enviado pelo cliente frontend
+    if (req.query?.origin && typeof req.query.origin === "string" && req.query.origin.trim()) {
+      const cleanOrigin = req.query.origin.trim().replace(/\/$/, "");
+      return `${cleanOrigin}/auth/callback`;
+    }
+
+    // 3. Origem detectada via cabeçalhos HTTP Origin ou Referer da sessão ativa do navegador
+    if (req.headers.origin && typeof req.headers.origin === "string") {
+      return `${req.headers.origin.replace(/\/$/, "")}/auth/callback`;
+    }
+    if (req.headers.referer && typeof req.headers.referer === "string") {
+      try {
+        const refUrl = new URL(req.headers.referer);
+        return `${refUrl.origin}/auth/callback`;
+      } catch (_) {}
+    }
+
+    // 4. Detecção dinâmica via proxy reverso (Cloud Run / Nginx) do domínio atual
+    const host = req.headers["x-forwarded-host"] || req.headers.host;
+    if (host && typeof host === "string") {
+      const protocol = req.headers["x-forwarded-proto"] || (host.includes("localhost") ? "http" : "https");
+      return `${protocol}://${host}/auth/callback`;
+    }
+
+    // 5. Fallback para APP_URL de variáveis de ambiente apenas se não houver host detectado
     let cleanAppUrl = process.env.APP_URL ? process.env.APP_URL.trim() : "";
     if (cleanAppUrl) {
-      // Se a URL configurada já termina com /auth/callback, remove para evitar duplicação ao reconstruir
       if (cleanAppUrl.toLowerCase().endsWith("/auth/callback")) {
         cleanAppUrl = cleanAppUrl.substring(0, cleanAppUrl.length - "/auth/callback".length);
       }
       return `${cleanAppUrl.replace(/\/$/, "")}/auth/callback`;
     }
-    // Dynamically detect domain from headers in proxy setups (Cloud Run/Nginx)
-    const host = req.headers["x-forwarded-host"] || req.headers.host;
-    const protocol = req.headers["x-forwarded-proto"] || "https";
-    return `${protocol}://${host}/auth/callback`;
+
+    return "http://localhost:3000/auth/callback";
   };
 
   // API Route: Get Auth URL
@@ -369,7 +396,7 @@ async function startServer() {
       redirect_uri: currentRedirectUri,
       response_mode: "query",
       scope: "files.readwrite.all User.Read offline_access",
-      state: "12345", // Em produção use algo dinâmico
+      state: `pkce_${verifier}`,
       prompt: "select_account",
       code_challenge: challenge,
       code_challenge_method: "S256",
@@ -387,8 +414,11 @@ async function startServer() {
       return res.status(400).send("Código de autorização ausente");
     }
 
-    // Recupera o code_verifier salvo no cookie (caso tenha sido iniciado pelo servidor ou pela SPA que salvou o cookie)
-    const codeVerifier = req.cookies.onedrive_code_verifier;
+    // Recupera o code_verifier salvo no cookie ou no state (garantia contra bloqueio de cookies)
+    let codeVerifier = req.cookies.onedrive_code_verifier;
+    if (!codeVerifier && typeof req.query.state === "string" && req.query.state.startsWith("pkce_")) {
+      codeVerifier = req.query.state.replace("pkce_", "");
+    }
 
     try {
       const creds = await getOneDriveCredentials();

@@ -23,7 +23,7 @@ import {
   updatePassword 
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-import { Usuario } from './types';
+import { Usuario, Secretaria } from './types';
 import Dashboard from './components/Dashboard';
 import SecretariaList from './components/SecretariaList';
 import DepartamentoList from './components/DepartamentoList';
@@ -48,6 +48,7 @@ export default function App() {
   const [selectedSec, setSelectedSec] = useState<string | undefined>();
   const [selectedSecForDepts, setSelectedSecForDepts] = useState<string | undefined>();
   const [selectedDept, setSelectedDept] = useState<string | undefined>();
+  const [selectedSecData, setSelectedSecData] = useState<Secretaria | undefined>();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [onedriveUser, setOnedriveUser] = useState<OneDriveUser | null>(null);
@@ -87,7 +88,38 @@ export default function App() {
     if (code) {
       const exchangeCode = async () => {
         try {
-          const verifier = sessionStorage.getItem('onedrive_code_verifier');
+          // Recuperação multi-estratégia à prova de falhas do code_verifier:
+          // 1. localStorage (compartilhado entre abas e janelas popup da mesma origem)
+          // 2. sessionStorage
+          // 3. state retornado na URL pela Microsoft (pkce_<verifier>)
+          // 4. cookies do navegador
+          // 5. window.opener
+          let verifier = localStorage.getItem('onedrive_code_verifier') || sessionStorage.getItem('onedrive_code_verifier');
+
+          if (!verifier) {
+            const stateVal = searchParams.get('state') || hashParams.get('state') || '';
+            if (stateVal.startsWith('pkce_')) {
+              verifier = stateVal.replace('pkce_', '');
+            }
+          }
+
+          if (!verifier && typeof document !== 'undefined' && document.cookie) {
+            const cookieMatch = document.cookie.match(/(?:^|;\s*)onedrive_code_verifier=([^;]+)/);
+            if (cookieMatch && cookieMatch[1]) {
+              verifier = decodeURIComponent(cookieMatch[1]);
+            }
+          }
+
+          if (!verifier && window.opener) {
+            try {
+              verifier = window.opener.localStorage?.getItem('onedrive_code_verifier') ||
+                         window.opener.sessionStorage?.getItem('onedrive_code_verifier');
+            } catch (e) {
+              console.warn("Opener storage inacessível:", e);
+            }
+          }
+
+          console.log("[OAuth Callback] Verifier encontrado?", !!verifier);
           const result = await onedriveService.exchangeCodeForToken(code, verifier);
           
           if (result.token) {
@@ -95,6 +127,12 @@ export default function App() {
             if (result.refreshToken) {
               localStorage.setItem('onedrive_refresh_token', result.refreshToken);
             }
+
+            // Limpa o verifier temporário
+            try {
+              localStorage.removeItem('onedrive_code_verifier');
+              sessionStorage.removeItem('onedrive_code_verifier');
+            } catch (e) {}
 
             if (window.opener) {
               try {
@@ -499,6 +537,7 @@ export default function App() {
     setSelectedSec(undefined);
     setSelectedSecForDepts(undefined);
     setSelectedDept(undefined);
+    setSelectedSecData(undefined);
   };
 
   if (isAuthCallback) {
@@ -945,8 +984,8 @@ export default function App() {
                  exit={{ opacity: 0, x: -20 }}
               >
                 <SecretariaList 
-                  onSelect={(id) => setSelectedSec(id)} 
-                  onSelectDepartments={(id) => setSelectedSecForDepts(id)}
+                  onSelect={(id, sec) => { setSelectedSec(id); setSelectedSecData(sec); }} 
+                  onSelectDepartments={(id, sec) => { setSelectedSecForDepts(id); setSelectedSecData(sec); }}
                   role={profile?.role}
                 />
               </motion.div>
@@ -961,7 +1000,8 @@ export default function App() {
               >
                 <DepartamentoList 
                   secretariaId={selectedSecForDepts} 
-                  onBack={() => setSelectedSecForDepts(undefined)} 
+                  initialSecretaria={selectedSecData}
+                  onBack={() => { setSelectedSecForDepts(undefined); setSelectedSecData(undefined); }} 
                   onSelectDepartamento={(id) => setSelectedDept(id)}
                   role={profile?.role}
                 />
@@ -977,7 +1017,8 @@ export default function App() {
               >
                 <RelatorioConsolidado 
                   secretariaId={selectedSec} 
-                  onBack={() => setSelectedSec(undefined)} 
+                  initialSecretaria={selectedSecData}
+                  onBack={() => { setSelectedSec(undefined); setSelectedSecData(undefined); }} 
                   role={profile?.role}
                 />
               </motion.div>

@@ -188,9 +188,9 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
 }
 
 function generateCodeVerifier(): string {
-  const array = new Uint32Array(56);
+  const array = new Uint8Array(32);
   window.crypto.getRandomValues(array);
-  return Array.from(array, dec => ('0' + dec.toString(16)).slice(-2)).join('');
+  return Array.from(array, byte => ('0' + byte.toString(16)).slice(-2)).join('');
 }
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
@@ -209,13 +209,22 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
     .replace(/=+$/, '');
 }
 
+let cachedOneDriveUser: OneDriveUser | null = null;
+let cachedOneDriveUserTime = 0;
+
 export const onedriveService = {
   async getAuthUrl(): Promise<string> {
     const isVercel = window.location.hostname.includes('vercel.app');
 
+    const currentRedirectUri = `${window.location.origin}/auth/callback`;
+
     if (!isVercel) {
       try {
-        const res = await fetch('/api/auth/onedrive/url');
+        const queryParams = new URLSearchParams({
+          origin: window.location.origin,
+          redirect_uri: currentRedirectUri
+        });
+        const res = await fetch(`/api/auth/onedrive/url?${queryParams.toString()}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.url) {
@@ -235,10 +244,17 @@ export const onedriveService = {
 
     // Gerar PKCE Verifier e Challenge
     const codeVerifier = generateCodeVerifier();
-    sessionStorage.setItem('onedrive_code_verifier', codeVerifier);
     
-    // Também salva no cookie para que, se o callback for processado pelo backend Express (Cloud Run), ele saiba o code_verifier correto
-    document.cookie = `onedrive_code_verifier=${codeVerifier}; path=/; max-age=3600; Secure; SameSite=None`;
+    // Salva em múltiplos locais para garantir persistência total entre abas, popups e redirecionamentos completos
+    try {
+      localStorage.setItem('onedrive_code_verifier', codeVerifier);
+    } catch (e) {}
+    try {
+      sessionStorage.setItem('onedrive_code_verifier', codeVerifier);
+    } catch (e) {}
+    try {
+      document.cookie = `onedrive_code_verifier=${encodeURIComponent(codeVerifier)}; path=/; max-age=3600; Secure; SameSite=Lax`;
+    } catch (e) {}
 
     let codeChallenge = '';
     try {
@@ -247,13 +263,12 @@ export const onedriveService = {
       console.warn("Erro ao gerar Code Challenge usando Web Crypto.", e);
     }
 
-    const currentRedirectUri = `${window.location.origin}/auth/callback`;
     const params = new URLSearchParams({
       client_id: config.clientId.trim(),
-      response_type: "code", // Alterado de "token" para "code" para evitar erro no Azure AD/Vercel
+      response_type: "code",
       redirect_uri: currentRedirectUri,
       scope: "files.readwrite.all User.Read offline_access",
-      state: "12345",
+      state: `pkce_${codeVerifier}`,
       prompt: "select_account",
     });
 
@@ -279,10 +294,9 @@ export const onedriveService = {
       redirect_uri: currentRedirectUri,
     });
 
-    // Em chamadas diretas pelo navegador (fluxo de SPA), NÃO devemos enviar o client_secret.
-    // O Azure AD impede a troca de tokens via CORS se o client_secret estiver presente (Erro AADSTS90023).
-    if (codeVerifier) {
-      params.append('code_verifier', codeVerifier);
+    // Garante que o code_verifier sempre seja enviado se existir
+    if (codeVerifier && codeVerifier.trim()) {
+      params.append('code_verifier', codeVerifier.trim());
     }
 
     const tokenUrl = `https://login.microsoftonline.com/${config.tenant || "common"}/oauth2/v2.0/token`;
@@ -312,7 +326,17 @@ export const onedriveService = {
     };
   },
 
-  async getUser(): Promise<OneDriveUser | null> {
+  clearUserCache() {
+    cachedOneDriveUser = null;
+    cachedOneDriveUserTime = 0;
+  },
+
+  async getUser(forceRefresh = false): Promise<OneDriveUser | null> {
+    const now = Date.now();
+    if (!forceRefresh && cachedOneDriveUserTime > 0 && (now - cachedOneDriveUserTime < 30000)) {
+      return cachedOneDriveUser;
+    }
+
     try {
       const res = await apiFetch('/api/onedrive/me');
       if (!res.ok) {
@@ -320,16 +344,24 @@ export const onedriveService = {
           localStorage.removeItem('onedrive_token');
           localStorage.removeItem('onedrive_refresh_token');
         }
+        cachedOneDriveUser = null;
+        cachedOneDriveUserTime = now;
         return null;
       }
       const data = await res.json();
       if (data && (data.error || !data.displayName)) {
         localStorage.removeItem('onedrive_token');
         localStorage.removeItem('onedrive_refresh_token');
+        cachedOneDriveUser = null;
+        cachedOneDriveUserTime = now;
         return null;
       }
+      cachedOneDriveUser = data;
+      cachedOneDriveUserTime = now;
       return data;
     } catch {
+      cachedOneDriveUser = null;
+      cachedOneDriveUserTime = now;
       return null;
     }
   },

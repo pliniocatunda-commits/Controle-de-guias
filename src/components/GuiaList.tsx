@@ -189,6 +189,8 @@ export default function GuiaList({
   });
   const [modalValorStr, setModalValorStr] = useState("");
   const [tempValues, setTempValues] = useState<Record<string, string>>({});
+  const [tempGrcp, setTempGrcp] = useState<Record<string, string>>({});
+  const debounceTimers = useRef<Record<string, any>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isExtractingAi, setIsExtractingAi] = useState(false);
 
@@ -201,12 +203,16 @@ export default function GuiaList({
     text: string;
   } | null>(null);
 
+  // Carrega secretarias e departamentos (somente no carregamento inicial ou se departamentoId mudar)
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
+    let isMounted = true;
+    async function fetchStructure() {
       try {
-        // Fetch and sort secretarias
-        const secSnap = await getDocs(collection(db, "secretarias"));
+        const [secSnap, deptSnap] = await Promise.all([
+          getDocs(collection(db, "secretarias")),
+          getDocs(collection(db, "departamentos")),
+        ]);
+
         const secs = secSnap.docs.map(
           (d) => ({ id: d.id, ...d.data() }) as Secretaria,
         );
@@ -214,7 +220,11 @@ export default function GuiaList({
           const getTimestamp = (val: any) => {
             if (!val) return 0;
             if (typeof val.toDate === "function") return val.toDate().getTime();
-            if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+            if (val.seconds !== undefined)
+              return (
+                val.seconds * 1000 +
+                (val.nanoseconds ? val.nanoseconds / 1000000 : 0)
+              );
             if (val instanceof Date) return val.getTime();
             if (typeof val === "number") return val;
             return new Date(val).getTime() || 0;
@@ -225,32 +235,39 @@ export default function GuiaList({
           return (a.nome || "").localeCompare(b.nome || "");
         });
 
-        // Posiciona "ARTICULAÇÃO POLITICA" logo após "ESPORTE E JUVENTUDE"
-        const idxArticulacao = secs.findIndex(sec => {
-          const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const idxArticulacao = secs.findIndex((sec) => {
+          const n = (sec.nome || "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
           return n.includes("articulacao politica");
         });
-        const idxEsporte = secs.findIndex(sec => {
-          const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const idxEsporte = secs.findIndex((sec) => {
+          const n = (sec.nome || "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
           return n.includes("esporte") && n.includes("juventude");
         });
 
         if (idxArticulacao !== -1 && idxEsporte !== -1) {
           const articulacaoItem = secs[idxArticulacao];
           secs.splice(idxArticulacao, 1);
-          
-          const newIdxEsporte = secs.findIndex(sec => {
-            const n = (sec.nome || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+          const newIdxEsporte = secs.findIndex((sec) => {
+            const n = (sec.nome || "")
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "");
             return n.includes("esporte") && n.includes("juventude");
           });
-          
+
           secs.splice(newIdxEsporte + 1, 0, articulacaoItem);
         }
 
+        if (!isMounted) return;
         setSecretarias(secs);
 
-        // Fetch departments
-        const deptSnap = await getDocs(collection(db, "departamentos"));
         let depts = deptSnap.docs.map(
           (d) => ({ id: d.id, ...d.data() }) as Departamento,
         );
@@ -259,9 +276,6 @@ export default function GuiaList({
           depts = depts.filter((d) => d.id === departamentoId);
         }
 
-        // Sort departments by:
-        // 1. Secretaria position in sorted `secs`
-        // 2. Departamento's own createdAt timestamp -> nome
         const secOrder = new Map(secs.map((s, idx) => [s.id, idx]));
         depts.sort((a, b) => {
           const orderA = secOrder.get(a.secretariaId) ?? Infinity;
@@ -271,7 +285,11 @@ export default function GuiaList({
           const getTimestamp = (val: any) => {
             if (!val) return 0;
             if (typeof val.toDate === "function") return val.toDate().getTime();
-            if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds ? val.nanoseconds / 1000000 : 0);
+            if (val.seconds !== undefined)
+              return (
+                val.seconds * 1000 +
+                (val.nanoseconds ? val.nanoseconds / 1000000 : 0)
+              );
             if (val instanceof Date) return val.getTime();
             if (typeof val === "number") return val;
             return new Date(val).getTime() || 0;
@@ -283,42 +301,98 @@ export default function GuiaList({
         });
 
         setDepartamentos(depts);
+      } catch (error) {
+        console.error("Erro ao carregar estrutura:", error);
+      }
+    }
+    fetchStructure();
+    return () => {
+      isMounted = false;
+    };
+  }, [departamentoId]);
 
+  // Carrega guias com agilidade para o mês e ano fiscal selecionado
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchGuias() {
+      if (departamentos.length === 0) setLoading(true);
+      try {
         const q = query(
           collection(db, "guias"),
           where("mes", "==", mesReferencia),
           where("ano", "==", anoFiscal),
         );
         const snapshot = await getDocs(q);
-        setGuias(
-          snapshot.docs.map((doc) =>
-            normalizeGuia({ id: doc.id, ...doc.data() }),
-          ),
-        );
+        if (isMounted) {
+          setGuias(
+            snapshot.docs.map((doc) =>
+              normalizeGuia({ id: doc.id, ...doc.data() }),
+            ),
+          );
+        }
       } catch (error) {
-        console.error(error);
+        console.error("Erro ao buscar guias:", error);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
-    fetchData();
-  }, [mesReferencia, anoFiscal, departamentoId]);
+    fetchGuias();
+    return () => {
+      isMounted = false;
+    };
+  }, [mesReferencia, anoFiscal]);
 
-  const handleInlineUpdate = async (
+  // Atualização otimista imediata na memória com debounce na escrita do Firestore
+  const handleInlineUpdate = (
     guiaId: string,
     field: string,
     value: any,
+    debounceMs = 500,
   ) => {
     if (role !== "master" && role !== "admin") return;
-    try {
-      await updateDoc(doc(db, "guias", guiaId), { [field]: value });
-      setGuias((prev) =>
-        prev.map((g) =>
-          g.id === guiaId ? normalizeGuia({ ...g, [field]: value }) : g,
-        ),
+
+    // 1. Atualização em memória (0ms de latência visual e recálculo dinâmico)
+    setGuias((prev) =>
+      prev.map((g) =>
+        g.id === guiaId ? normalizeGuia({ ...g, [field]: value }) : g,
+      ),
+    );
+
+    // 2. Debounce na gravação no Firestore
+    const timerKey = `${guiaId}_${field}`;
+    if (debounceTimers.current[timerKey]) {
+      clearTimeout(debounceTimers.current[timerKey]);
+    }
+
+    if (debounceMs <= 0) {
+      updateDoc(doc(db, "guias", guiaId), { [field]: value }).catch((err) =>
+        console.error("Erro no update inline imediato:", err),
       );
-    } catch (error) {
-      console.error("Erro no update inline:", error);
+      return;
+    }
+
+    debounceTimers.current[timerKey] = setTimeout(async () => {
+      try {
+        await updateDoc(doc(db, "guias", guiaId), { [field]: value });
+      } catch (error) {
+        console.error("Erro no update inline debounced:", error);
+      } finally {
+        delete debounceTimers.current[timerKey];
+      }
+    }, debounceMs);
+  };
+
+  // Garante a persistência imediata ao sair do campo (onBlur)
+  const flushInlineUpdate = (guiaId: string, field: string, value: any) => {
+    const timerKey = `${guiaId}_${field}`;
+    if (debounceTimers.current[timerKey]) {
+      clearTimeout(debounceTimers.current[timerKey]);
+      delete debounceTimers.current[timerKey];
+    }
+    if (role === "master" || role === "admin") {
+      updateDoc(doc(db, "guias", guiaId), { [field]: value }).catch((err) =>
+        console.error("Erro ao persistir campo no onBlur:", err),
+      );
     }
   };
 
@@ -860,14 +934,38 @@ export default function GuiaList({
                               type="text"
                               disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={patData.identificacaoGrcp || ""}
-                              onChange={(e) =>
+                              value={
+                                tempGrcp[patData.id] !== undefined
+                                  ? tempGrcp[patData.id]
+                                  : (patData.identificacaoGrcp || "")
+                              }
+                              placeholder="Identificação..."
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTempGrcp((prev) => ({
+                                  ...prev,
+                                  [patData.id]: val,
+                                }));
                                 handleInlineUpdate(
                                   patData.id,
                                   "identificacaoGrcp",
-                                  e.target.value,
-                                )
-                              }
+                                  val,
+                                  600,
+                                );
+                              }}
+                              onBlur={(e) => {
+                                const val = e.target.value;
+                                flushInlineUpdate(
+                                  patData.id,
+                                  "identificacaoGrcp",
+                                  val,
+                                );
+                                setTempGrcp((prev) => {
+                                  const next = { ...prev };
+                                  delete next[patData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           ) : (
                             <span className="text-gray-200 text-[8px]">
@@ -903,13 +1001,21 @@ export default function GuiaList({
                                   ...prev,
                                   [patData.id]: typed,
                                 }));
+                                const numVal = parseBRLToFloat(typed);
                                 handleInlineUpdate(
                                   patData.id,
                                   "valor",
-                                  parseBRLToFloat(typed),
+                                  numVal,
+                                  600,
                                 );
                               }}
-                              onBlur={() => {
+                              onBlur={(e) => {
+                                const typed =
+                                  tempValues[patData.id] !== undefined
+                                    ? tempValues[patData.id]
+                                    : e.target.value;
+                                const numVal = parseBRLToFloat(typed);
+                                flushInlineUpdate(patData.id, "valor", numVal);
                                 setTempValues((prev) => {
                                   const next = { ...prev };
                                   delete next[patData.id];
@@ -1051,14 +1157,38 @@ export default function GuiaList({
                               type="text"
                               disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={segData.identificacaoGrcp || ""}
-                              onChange={(e) =>
+                              value={
+                                tempGrcp[segData.id] !== undefined
+                                  ? tempGrcp[segData.id]
+                                  : (segData.identificacaoGrcp || "")
+                              }
+                              placeholder="Identificação..."
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTempGrcp((prev) => ({
+                                  ...prev,
+                                  [segData.id]: val,
+                                }));
                                 handleInlineUpdate(
                                   segData.id,
                                   "identificacaoGrcp",
-                                  e.target.value,
-                                )
-                              }
+                                  val,
+                                  600,
+                                );
+                              }}
+                              onBlur={(e) => {
+                                const val = e.target.value;
+                                flushInlineUpdate(
+                                  segData.id,
+                                  "identificacaoGrcp",
+                                  val,
+                                );
+                                setTempGrcp((prev) => {
+                                  const next = { ...prev };
+                                  delete next[segData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           ) : (
                             <span className="text-gray-200 text-[8px]">
@@ -1094,13 +1224,21 @@ export default function GuiaList({
                                   ...prev,
                                   [segData.id]: typed,
                                 }));
+                                const numVal = parseBRLToFloat(typed);
                                 handleInlineUpdate(
                                   segData.id,
                                   "valor",
-                                  parseBRLToFloat(typed),
+                                  numVal,
+                                  600,
                                 );
                               }}
-                              onBlur={() => {
+                              onBlur={(e) => {
+                                const typed =
+                                  tempValues[segData.id] !== undefined
+                                    ? tempValues[segData.id]
+                                    : e.target.value;
+                                const numVal = parseBRLToFloat(typed);
+                                flushInlineUpdate(segData.id, "valor", numVal);
                                 setTempValues((prev) => {
                                   const next = { ...prev };
                                   delete next[segData.id];

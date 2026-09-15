@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { db } from "../lib/firebase";
+import { db, runWithTimeout } from "../lib/firebase";
 import {
   collection,
   query,
   where,
   getDocs,
+  getDoc,
   orderBy,
   addDoc,
   updateDoc,
@@ -92,16 +93,18 @@ interface ConsolidatedTableProps {
   secretariaId: string;
   onBack: () => void;
   role?: string;
+  initialSecretaria?: Secretaria;
 }
 
 export default function RelatorioConsolidado({
   secretariaId,
   onBack,
   role,
+  initialSecretaria,
 }: ConsolidatedTableProps) {
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [guias, setGuias] = useState<Guia[]>([]);
-  const [secretaria, setSecretaria] = useState<Secretaria | null>(null);
+  const [secretaria, setSecretaria] = useState<Secretaria | null>(initialSecretaria || null);
   const [loading, setLoading] = useState(true);
   const [mes, setMes] = useState(() => {
     const saved = sessionStorage.getItem("trabalho_mes");
@@ -121,6 +124,8 @@ export default function RelatorioConsolidado({
   }, [ano]);
 
   const [tempValues, setTempValues] = useState<Record<string, string>>({});
+  const [tempGrcp, setTempGrcp] = useState<Record<string, string>>({});
+  const debounceTimers = useRef<Record<string, any>>({});
   const [activeRegime, setActiveRegime] = useState<
     "capitalizado" | "financeiro"
   >("capitalizado");
@@ -402,7 +407,7 @@ export default function RelatorioConsolidado({
         "Arquivo do OneDrive vinculado com sucesso!",
         "success",
       );
-      await fetchData(); // Reload grid!
+      await fetchGuias(); // Reload grid!
       setLinkContext(null); // Close modal!
       setSelectedOdFile(null);
     } catch (err: any) {
@@ -413,50 +418,102 @@ export default function RelatorioConsolidado({
     }
   };
 
-  const fetchData = async () => {
-    setLoading(true);
+  // Carrega secretaria e departamentos em paralelo com alta velocidade e resiliência
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSecretariaAndDepts() {
+      try {
+        const secPromise = (initialSecretaria || secretaria)
+          ? Promise.resolve(null)
+          : runWithTimeout(getDoc(doc(db, "secretarias", secretariaId)), 6000).catch(err => {
+              console.warn("Aviso ao carregar secretaria no relatório:", err);
+              return null;
+            });
+
+        const deptPromise = runWithTimeout(
+          getDocs(
+            query(
+              collection(db, "departamentos"),
+              where("secretariaId", "==", secretariaId),
+            ),
+          ),
+          7000
+        ).catch(err => {
+          console.warn("Aviso na busca direta de departamentos no relatório:", err);
+          return null;
+        });
+
+        const [secSnap, deptSnap] = await Promise.all([secPromise, deptPromise]);
+
+        if (secSnap && secSnap.exists() && isMounted) {
+          setSecretaria({ id: secSnap.id, ...secSnap.data() } as Secretaria);
+        }
+
+        let depts: Departamento[] = [];
+        if (deptSnap && !deptSnap.empty) {
+          depts = deptSnap.docs.map(
+            (d) => ({ id: d.id, ...d.data() }) as Departamento,
+          );
+        } else {
+          // Fallback resiliente
+          try {
+            const allDeptsSnap = await runWithTimeout(getDocs(collection(db, "departamentos")), 6000);
+            if (allDeptsSnap && !allDeptsSnap.empty) {
+              depts = allDeptsSnap.docs
+                .map((d) => ({ id: d.id, ...d.data() }) as Departamento)
+                .filter((d) => String(d.secretariaId).trim() === String(secretariaId).trim());
+            }
+          } catch (fbErr) {
+            console.warn("Erro no fallback de departamentos do relatório:", fbErr);
+          }
+        }
+
+        if (isMounted) {
+          depts.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+          setDepartamentos(depts);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar secretaria/departamentos:", error);
+      }
+    }
+    loadSecretariaAndDepts();
+    return () => {
+      isMounted = false;
+    };
+  }, [secretariaId, initialSecretaria]);
+
+  // Carrega as guias do mês/ano selecionado com alta agilidade
+  const fetchGuias = async (showFullLoading = false) => {
+    if (showFullLoading) setLoading(true);
     try {
-      const secSnap = await getDocs(collection(db, "secretarias"));
-      const sec = secSnap.docs.find((d) => d.id === secretariaId);
-      if (sec) setSecretaria({ id: sec.id, ...sec.data() } as Secretaria);
-
-      const deptSnap = await getDocs(
-        query(
-          collection(db, "departamentos"),
-          where("secretariaId", "==", secretariaId),
+      const guiasSnap = await runWithTimeout(
+        getDocs(
+          query(
+            collection(db, "guias"),
+            where("mes", "==", mes),
+            where("ano", "==", ano),
+          ),
         ),
-      );
-      const depts = deptSnap.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() }) as Departamento,
-      );
-      depts.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
-      setDepartamentos(depts);
-
-      const guiasSnap = await getDocs(
-        query(
-          collection(db, "guias"),
-          where("mes", "==", mes),
-          where("ano", "==", ano),
-        ),
+        8000
       );
       setGuias(
-        guiasSnap.docs.map((doc) =>
-          normalizeGuia({ id: doc.id, ...doc.data() }),
+        guiasSnap.docs.map((d) =>
+          normalizeGuia({ id: d.id, ...d.data() }),
         ),
       );
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao carregar guias:", error);
     } finally {
-      setLoading(false);
+      if (showFullLoading) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-    checkOneDriveStatus();
+    fetchGuias(departamentos.length === 0);
   }, [secretariaId, mes, ano]);
 
   useEffect(() => {
+    checkOneDriveStatus();
     const handleFocus = () => {
       checkOneDriveStatus();
     };
@@ -466,21 +523,57 @@ export default function RelatorioConsolidado({
     };
   }, []);
 
-  const handleInlineUpdate = async (
+  // Atualização instantânea na memória (0ms de latência e recálculo dinâmico dos totais) com debounce no Firestore
+  const handleInlineUpdate = (
     guiaId: string,
     field: string,
     value: any,
+    debounceMs = 500,
   ) => {
     if (role !== "master" && role !== "admin") return;
-    try {
-      await updateDoc(doc(db, "guias", guiaId), { [field]: value });
-      setGuias((prev) =>
-        prev.map((g) =>
-          g.id === guiaId ? normalizeGuia({ ...g, [field]: value }) : g,
-        ),
+
+    // 1. Otimista: atualiza imediatamente a guia em memória para que totais e tabela reajam instantaneamente
+    setGuias((prev) =>
+      prev.map((g) =>
+        g.id === guiaId ? normalizeGuia({ ...g, [field]: value }) : g,
+      ),
+    );
+
+    // 2. Debounce na gravação no Firestore para não travar o navegador a cada caractere digitado
+    const timerKey = `${guiaId}_${field}`;
+    if (debounceTimers.current[timerKey]) {
+      clearTimeout(debounceTimers.current[timerKey]);
+    }
+
+    if (debounceMs <= 0) {
+      updateDoc(doc(db, "guias", guiaId), { [field]: value }).catch((err) =>
+        console.error("Erro no update inline imediato:", err),
       );
-    } catch (error) {
-      console.error(error);
+      return;
+    }
+
+    debounceTimers.current[timerKey] = setTimeout(async () => {
+      try {
+        await updateDoc(doc(db, "guias", guiaId), { [field]: value });
+      } catch (error) {
+        console.error("Erro no update inline debounced:", error);
+      } finally {
+        delete debounceTimers.current[timerKey];
+      }
+    }, debounceMs);
+  };
+
+  // Garante persistência imediata ao sair do campo (onBlur)
+  const flushInlineUpdate = (guiaId: string, field: string, value: any) => {
+    const timerKey = `${guiaId}_${field}`;
+    if (debounceTimers.current[timerKey]) {
+      clearTimeout(debounceTimers.current[timerKey]);
+      delete debounceTimers.current[timerKey];
+    }
+    if (role === "master" || role === "admin") {
+      updateDoc(doc(db, "guias", guiaId), { [field]: value }).catch((err) =>
+        console.error("Erro ao persistir campo no onBlur:", err),
+      );
     }
   };
 
@@ -929,14 +1022,38 @@ export default function RelatorioConsolidado({
                               type="text"
                               disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={patData.identificacaoGrcp || ""}
-                              onChange={(e) =>
+                              value={
+                                tempGrcp[patData.id] !== undefined
+                                  ? tempGrcp[patData.id]
+                                  : (patData.identificacaoGrcp || "")
+                              }
+                              placeholder="Identificação..."
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTempGrcp((prev) => ({
+                                  ...prev,
+                                  [patData.id]: val,
+                                }));
                                 handleInlineUpdate(
                                   patData.id,
                                   "identificacaoGrcp",
-                                  e.target.value,
-                                )
-                              }
+                                  val,
+                                  600,
+                                );
+                              }}
+                              onBlur={(e) => {
+                                const val = e.target.value;
+                                flushInlineUpdate(
+                                  patData.id,
+                                  "identificacaoGrcp",
+                                  val,
+                                );
+                                setTempGrcp((prev) => {
+                                  const next = { ...prev };
+                                  delete next[patData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           ) : (
                             <span className="text-gray-200 text-[8px]">
@@ -972,13 +1089,21 @@ export default function RelatorioConsolidado({
                                   ...prev,
                                   [patData.id]: typed,
                                 }));
+                                const numVal = parseBRLToFloat(typed);
                                 handleInlineUpdate(
                                   patData.id,
                                   "valor",
-                                  parseBRLToFloat(typed),
+                                  numVal,
+                                  600,
                                 );
                               }}
-                              onBlur={() => {
+                              onBlur={(e) => {
+                                const typed =
+                                  tempValues[patData.id] !== undefined
+                                    ? tempValues[patData.id]
+                                    : e.target.value;
+                                const numVal = parseBRLToFloat(typed);
+                                flushInlineUpdate(patData.id, "valor", numVal);
                                 setTempValues((prev) => {
                                   const next = { ...prev };
                                   delete next[patData.id];
@@ -1168,14 +1293,38 @@ export default function RelatorioConsolidado({
                               type="text"
                               disabled={role !== "master" && role !== "admin"}
                               className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={segData.identificacaoGrcp || ""}
-                              onChange={(e) =>
+                              value={
+                                tempGrcp[segData.id] !== undefined
+                                  ? tempGrcp[segData.id]
+                                  : (segData.identificacaoGrcp || "")
+                              }
+                              placeholder="Identificação..."
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTempGrcp((prev) => ({
+                                  ...prev,
+                                  [segData.id]: val,
+                                }));
                                 handleInlineUpdate(
                                   segData.id,
                                   "identificacaoGrcp",
-                                  e.target.value,
-                                )
-                              }
+                                  val,
+                                  600,
+                                );
+                              }}
+                              onBlur={(e) => {
+                                const val = e.target.value;
+                                flushInlineUpdate(
+                                  segData.id,
+                                  "identificacaoGrcp",
+                                  val,
+                                );
+                                setTempGrcp((prev) => {
+                                  const next = { ...prev };
+                                  delete next[segData.id];
+                                  return next;
+                                });
+                              }}
                             />
                           ) : (
                             <span className="text-gray-200 text-[8px]">
@@ -1211,13 +1360,21 @@ export default function RelatorioConsolidado({
                                   ...prev,
                                   [segData.id]: typed,
                                 }));
+                                const numVal = parseBRLToFloat(typed);
                                 handleInlineUpdate(
                                   segData.id,
                                   "valor",
-                                  parseBRLToFloat(typed),
+                                  numVal,
+                                  600,
                                 );
                               }}
-                              onBlur={() => {
+                              onBlur={(e) => {
+                                const typed =
+                                  tempValues[segData.id] !== undefined
+                                    ? tempValues[segData.id]
+                                    : e.target.value;
+                                const numVal = parseBRLToFloat(typed);
+                                flushInlineUpdate(segData.id, "valor", numVal);
                                 setTempValues((prev) => {
                                   const next = { ...prev };
                                   delete next[segData.id];
