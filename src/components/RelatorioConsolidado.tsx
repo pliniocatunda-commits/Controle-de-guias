@@ -41,6 +41,7 @@ import {
   Loader2,
   MessageSquare,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
@@ -228,6 +229,146 @@ export default function RelatorioConsolidado({
     complementarId?: string;
     descricaoFolha?: string;
   } | null>(null);
+
+  const [editGuiaModal, setEditGuiaModal] = useState<{
+    isOpen: boolean;
+    guiaId: string;
+    deptNome: string;
+    tipo: "patronal" | "segurado";
+    target: "guia" | "comprovante";
+    descricaoFolha: string;
+    identificacaoGrcp: string;
+    valorStr: string;
+    complementarId?: string;
+  } | null>(null);
+
+  const handleOpenEditModal = (
+    guia: Guia,
+    deptNome: string,
+    target: "guia" | "comprovante" = "guia",
+  ) => {
+    const currentVal =
+      target === "comprovante"
+        ? (guia.valorPago ?? guia.valor ?? 0)
+        : (guia.valor ?? 0);
+    setEditGuiaModal({
+      isOpen: true,
+      guiaId: guia.id,
+      deptNome,
+      tipo: guia.tipo,
+      target,
+      descricaoFolha: guia.descricaoFolha || "",
+      identificacaoGrcp: guia.identificacaoGrcp || "",
+      valorStr: formatBRL(currentVal),
+      complementarId: guia.complementarId,
+    });
+  };
+
+  const handleSaveEditGuia = async () => {
+    if (!editGuiaModal || !editGuiaModal.guiaId) return;
+    const { guiaId, valorStr, identificacaoGrcp, descricaoFolha, target, complementarId } = editGuiaModal;
+    const numVal = parseBRLToFloat(valorStr);
+
+    try {
+      const updatePayload: Record<string, any> = {
+        identificacaoGrcp: identificacaoGrcp.trim(),
+        descricaoFolha: descricaoFolha.trim(),
+      };
+      if (target === "comprovante") {
+        updatePayload.valorPago = numVal;
+        const currentGuia = guias.find((g) => g.id === guiaId);
+        if (!currentGuia?.valor || currentGuia.valor === 0) {
+          updatePayload.valor = numVal;
+        }
+      } else {
+        updatePayload.valor = numVal;
+        const currentGuia = guias.find((g) => g.id === guiaId);
+        if (!currentGuia?.valorPago || currentGuia.valorPago === 0) {
+          updatePayload.valorPago = numVal;
+        }
+      }
+
+      await updateDoc(doc(db, "guias", guiaId), updatePayload);
+
+      if (complementarId && descricaoFolha.trim()) {
+        const sisterGuias = guias.filter(
+          (g) => g.complementarId === complementarId && g.id !== guiaId,
+        );
+        for (const sg of sisterGuias) {
+          await updateDoc(doc(db, "guias", sg.id), {
+            descricaoFolha: descricaoFolha.trim(),
+          });
+        }
+        setDraftComplementares((prev) => {
+          const next = { ...prev };
+          for (const dId in next) {
+            next[dId] = (next[dId] || []).map((c) =>
+              c.id === complementarId
+                ? { ...c, descricao: descricaoFolha.trim() }
+                : c,
+            );
+          }
+          return next;
+        });
+      }
+
+      setGuias((prev) =>
+        prev.map((g) => {
+          if (g.id === guiaId) {
+            return {
+              ...g,
+              ...updatePayload,
+            };
+          }
+          if (
+            complementarId &&
+            g.complementarId === complementarId &&
+            descricaoFolha.trim()
+          ) {
+            return {
+              ...g,
+              descricaoFolha: descricaoFolha.trim(),
+            };
+          }
+          return g;
+        }),
+      );
+
+      showAlert("Sucesso", "Informações atualizadas com sucesso!", "success");
+      setEditGuiaModal(null);
+    } catch (error) {
+      console.error("Erro ao salvar alterações da guia:", error);
+      showAlert("Erro", "Não foi possível salvar as alterações.", "danger");
+    }
+  };
+
+  const handleEditComplementarDescricao = (
+    deptId: string,
+    comp: { id: string; descricao: string },
+  ) => {
+    const compPat = getGuiaForDept(deptId, "patronal", comp.id);
+    const compSeg = getGuiaForDept(deptId, "segurado", comp.id);
+    const targetGuia = compPat || compSeg;
+    const dept = departamentos.find((d) => d.id === deptId);
+
+    if (targetGuia) {
+      handleOpenEditModal(targetGuia, `${dept?.nome || "Departamento"} (${comp.descricao})`, "guia");
+    } else {
+      const novaDesc = window.prompt(
+        "Nova descrição para a Folha Complementar:",
+        comp.descricao,
+      );
+      if (novaDesc && novaDesc.trim() && novaDesc.trim() !== comp.descricao) {
+        setDraftComplementares((prev) => ({
+          ...prev,
+          [deptId]: (prev[deptId] || []).map((c) =>
+            c.id === comp.id ? { ...c, descricao: novaDesc.trim() } : c,
+          ),
+        }));
+        showAlert("Sucesso", "Descrição atualizada.", "success");
+      }
+    }
+  };
 
   const handleSaveObservation = async (
     guiaId: string | null,
@@ -1373,13 +1514,24 @@ export default function RelatorioConsolidado({
                                 )}
                               </button>
                               {(role === "master" || role === "admin") && (
-                                <button
-                                  onClick={() => handleDeleteGuia(patData.id)}
-                                  className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                                  title="Deletar Lançamento"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteGuia(patData.id)}
+                                    className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Deletar Lançamento"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(patData, dept.nome, "guia")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -1431,48 +1583,59 @@ export default function RelatorioConsolidado({
                                 )}
                               </button>
                               {(role === "master" || role === "admin") && (
-                                <button
-                                  onClick={() => {
-                                    askConfirmation(
-                                      "Remover Comprovante",
-                                      "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                      "danger",
-                                      async () => {
-                                        try {
-                                          await updateDoc(
-                                            doc(db, "guias", patData.id),
-                                            {
-                                              urlComprovante: null,
-                                              status: "pendente",
-                                            },
-                                          );
-                                          setGuias((prev) =>
-                                            prev.map((g) =>
-                                              g.id === patData.id
-                                                ? {
-                                                    ...g,
-                                                    urlComprovante: null,
-                                                    status: "pendente",
-                                                  }
-                                                : g,
-                                            ),
-                                          );
-                                          showAlert(
-                                            "Desvinculado",
-                                            "Arquivo do comprovante de pagamento desassociado.",
-                                            "success",
-                                          );
-                                        } catch (err) {
-                                          console.error(err);
-                                        }
-                                      },
-                                    );
-                                  }}
-                                  className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                                  title="Desvincular Comprovante"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      askConfirmation(
+                                        "Remover Comprovante",
+                                        "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                        "danger",
+                                        async () => {
+                                          try {
+                                            await updateDoc(
+                                              doc(db, "guias", patData.id),
+                                              {
+                                                urlComprovante: null,
+                                                status: "pendente",
+                                              },
+                                            );
+                                            setGuias((prev) =>
+                                              prev.map((g) =>
+                                                g.id === patData.id
+                                                  ? {
+                                                      ...g,
+                                                      urlComprovante: null,
+                                                      status: "pendente",
+                                                    }
+                                                  : g,
+                                              ),
+                                            );
+                                            showAlert(
+                                              "Desvinculado",
+                                              "Arquivo do comprovante de pagamento desassociado.",
+                                              "success",
+                                            );
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        },
+                                      );
+                                    }}
+                                    className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Desvincular Comprovante"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(patData, dept.nome, "comprovante")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -1663,13 +1826,24 @@ export default function RelatorioConsolidado({
                                 )}
                               </button>
                               {(role === "master" || role === "admin") && (
-                                <button
-                                  onClick={() => handleDeleteGuia(segData.id)}
-                                  className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                                  title="Deletar Lançamento"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteGuia(segData.id)}
+                                    className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Deletar Lançamento"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(segData, dept.nome, "guia")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -1721,48 +1895,59 @@ export default function RelatorioConsolidado({
                                 )}
                               </button>
                               {(role === "master" || role === "admin") && (
-                                <button
-                                  onClick={() => {
-                                    askConfirmation(
-                                      "Remover Comprovante",
-                                      "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                      "danger",
-                                      async () => {
-                                        try {
-                                          await updateDoc(
-                                            doc(db, "guias", segData.id),
-                                            {
-                                              urlComprovante: null,
-                                              status: "pendente",
-                                            },
-                                          );
-                                          setGuias((prev) =>
-                                            prev.map((g) =>
-                                              g.id === segData.id
-                                                ? {
-                                                    ...g,
-                                                    urlComprovante: null,
-                                                    status: "pendente",
-                                                  }
-                                                : g,
-                                            ),
-                                          );
-                                          showAlert(
-                                            "Desvinculado",
-                                            "Arquivo do comprovante de pagamento desassociado.",
-                                            "success",
-                                          );
-                                        } catch (err) {
-                                          console.error(err);
-                                        }
-                                      },
-                                    );
-                                  }}
-                                  className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                                  title="Desvincular Comprovante"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      askConfirmation(
+                                        "Remover Comprovante",
+                                        "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                        "danger",
+                                        async () => {
+                                          try {
+                                            await updateDoc(
+                                              doc(db, "guias", segData.id),
+                                              {
+                                                urlComprovante: null,
+                                                status: "pendente",
+                                              },
+                                            );
+                                            setGuias((prev) =>
+                                              prev.map((g) =>
+                                                g.id === segData.id
+                                                  ? {
+                                                      ...g,
+                                                      urlComprovante: null,
+                                                      status: "pendente",
+                                                    }
+                                                  : g,
+                                              ),
+                                            );
+                                            showAlert(
+                                              "Desvinculado",
+                                              "Arquivo do comprovante de pagamento desassociado.",
+                                              "success",
+                                            );
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        },
+                                      );
+                                    }}
+                                    className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Desvincular Comprovante"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(segData, dept.nome, "comprovante")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -1829,14 +2014,24 @@ export default function RelatorioConsolidado({
                                   </span>
                                 </div>
                                 {(role === "master" || role === "admin") && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteComplementar(dept.id, comp.id)}
-                                    className="text-gray-300 hover:text-rose-600 p-1 rounded transition-colors"
-                                    title="Excluir Folha Complementar"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditComplementarDescricao(dept.id, comp)}
+                                      className="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"
+                                      title="Editar Descrição / Valores da Folha Complementar"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteComplementar(dept.id, comp.id)}
+                                      className="text-gray-300 hover:text-rose-600 p-1 rounded transition-colors"
+                                      title="Excluir Folha Complementar"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </td>
@@ -1988,13 +2183,24 @@ export default function RelatorioConsolidado({
                                     )}
                                   </button>
                                   {(role === "master" || role === "admin") && (
-                                    <button
-                                      onClick={() => handleDeleteGuia(compPatData.id)}
-                                      className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                                      title="Deletar Lançamento"
-                                    >
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteGuia(compPatData.id)}
+                                        className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Deletar Lançamento"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compPatData, `${dept.nome} (${comp.descricao})`, "guia")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
@@ -2049,48 +2255,59 @@ export default function RelatorioConsolidado({
                                     )}
                                   </button>
                                   {(role === "master" || role === "admin") && (
-                                    <button
-                                      onClick={() => {
-                                        askConfirmation(
-                                          "Remover Comprovante",
-                                          "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                          "danger",
-                                          async () => {
-                                            try {
-                                              await updateDoc(
-                                                doc(db, "guias", compPatData.id),
-                                                {
-                                                  urlComprovante: null,
-                                                  status: "pendente",
-                                                },
-                                              );
-                                              setGuias((prev) =>
-                                                prev.map((g) =>
-                                                  g.id === compPatData.id
-                                                    ? {
-                                                        ...g,
-                                                        urlComprovante: null,
-                                                        status: "pendente",
-                                                      }
-                                                    : g,
-                                                ),
-                                              );
-                                              showAlert(
-                                                "Desvinculado",
-                                                "Arquivo do comprovante de pagamento desassociado.",
-                                                "success",
-                                              );
-                                            } catch (err) {
-                                              console.error(err);
-                                            }
-                                          },
-                                        );
-                                      }}
-                                      className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                                      title="Desvincular Comprovante"
-                                    >
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          askConfirmation(
+                                            "Remover Comprovante",
+                                            "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                            "danger",
+                                            async () => {
+                                              try {
+                                                await updateDoc(
+                                                  doc(db, "guias", compPatData.id),
+                                                  {
+                                                    urlComprovante: null,
+                                                    status: "pendente",
+                                                  },
+                                                );
+                                                setGuias((prev) =>
+                                                  prev.map((g) =>
+                                                    g.id === compPatData.id
+                                                      ? {
+                                                          ...g,
+                                                          urlComprovante: null,
+                                                          status: "pendente",
+                                                        }
+                                                      : g,
+                                                  ),
+                                                );
+                                                showAlert(
+                                                  "Desvinculado",
+                                                  "Arquivo do comprovante de pagamento desassociado.",
+                                                  "success",
+                                                );
+                                              } catch (err) {
+                                                console.error(err);
+                                              }
+                                            },
+                                          );
+                                        }}
+                                        className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Desvincular Comprovante"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compPatData, `${dept.nome} (${comp.descricao})`, "comprovante")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
@@ -2289,13 +2506,24 @@ export default function RelatorioConsolidado({
                                     )}
                                   </button>
                                   {(role === "master" || role === "admin") && (
-                                    <button
-                                      onClick={() => handleDeleteGuia(compSegData.id)}
-                                      className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                                      title="Deletar Lançamento"
-                                    >
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteGuia(compSegData.id)}
+                                        className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Deletar Lançamento"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compSegData, `${dept.nome} (${comp.descricao})`, "guia")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
@@ -2350,48 +2578,59 @@ export default function RelatorioConsolidado({
                                     )}
                                   </button>
                                   {(role === "master" || role === "admin") && (
-                                    <button
-                                      onClick={() => {
-                                        askConfirmation(
-                                          "Remover Comprovante",
-                                          "Deseja realmente remover o comprovante de pagamento deste registro?",
-                                          "danger",
-                                          async () => {
-                                            try {
-                                              await updateDoc(
-                                                doc(db, "guias", compSegData.id),
-                                                {
-                                                  urlComprovante: null,
-                                                  status: "pendente",
-                                                },
-                                              );
-                                              setGuias((prev) =>
-                                                prev.map((g) =>
-                                                  g.id === compSegData.id
-                                                    ? {
-                                                        ...g,
-                                                        urlComprovante: null,
-                                                        status: "pendente",
-                                                      }
-                                                    : g,
-                                                ),
-                                              );
-                                              showAlert(
-                                                "Desvinculado",
-                                                "Arquivo do comprovante de pagamento desassociado.",
-                                                "success",
-                                              );
-                                            } catch (err) {
-                                              console.error(err);
-                                            }
-                                          },
-                                        );
-                                      }}
-                                      className="w-5 h-5 text-gray-300 hover:text-rose-600 transition-colors"
-                                      title="Desvincular Comprovante"
-                                    >
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          askConfirmation(
+                                            "Remover Comprovante",
+                                            "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                            "danger",
+                                            async () => {
+                                              try {
+                                                await updateDoc(
+                                                  doc(db, "guias", compSegData.id),
+                                                  {
+                                                    urlComprovante: null,
+                                                    status: "pendente",
+                                                  },
+                                                );
+                                                setGuias((prev) =>
+                                                  prev.map((g) =>
+                                                    g.id === compSegData.id
+                                                      ? {
+                                                          ...g,
+                                                          urlComprovante: null,
+                                                          status: "pendente",
+                                                        }
+                                                      : g,
+                                                  ),
+                                                );
+                                                showAlert(
+                                                  "Desvinculado",
+                                                  "Arquivo do comprovante de pagamento desassociado.",
+                                                  "success",
+                                                );
+                                              } catch (err) {
+                                                console.error(err);
+                                              }
+                                            },
+                                          );
+                                        }}
+                                        className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Desvincular Comprovante"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compSegData, `${dept.nome} (${comp.descricao})`, "comprovante")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
@@ -3012,6 +3251,102 @@ export default function RelatorioConsolidado({
                     Salvar
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL DE EDIÇÃO DE DESCRIÇÃO E VALOR */}
+        {editGuiaModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl border border-gray-100"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
+                  <Pencil className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900 tracking-tight">
+                    Editar Lançamento
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium">
+                    {editGuiaModal.deptNome} • <span className="capitalize">{editGuiaModal.tipo}</span> ({editGuiaModal.target === "guia" ? "Guia" : "Comprovante"})
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Descrição da Folha / Lançamento
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.descricaoFolha}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, descricaoFolha: e.target.value } : null,
+                      )
+                    }
+                    placeholder="Ex: Folha Mensal, Folha Complementar 1, etc."
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-bold focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Identificação GRCP
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.identificacaoGrcp}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, identificacaoGrcp: e.target.value } : null,
+                      )
+                    }
+                    placeholder="Ex: GRCP 123456"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-medium focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Valor (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.valorStr}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, valorStr: handleBRLChange(e.target.value) } : null,
+                      )
+                    }
+                    placeholder="0,00"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 font-mono font-bold focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setEditGuiaModal(null)}
+                  className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditGuia}
+                  className="px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
+                >
+                  Salvar Alterações
+                </button>
               </div>
             </motion.div>
           </div>

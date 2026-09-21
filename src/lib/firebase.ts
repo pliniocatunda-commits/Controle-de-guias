@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import appletFirebaseConfig from '../../firebase-applet-config.json';
 
@@ -20,9 +20,12 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
-// Conexão padrão otimizada com streaming WebChannel de alta velocidade
-export const db = getFirestore(
+// Conexão Firestore otimizada com auto-detecção de polling para evitar lentidão e travamentos em iframes/proxies
+export const db = initializeFirestore(
   app,
+  {
+    experimentalAutoDetectLongPolling: true,
+  },
   firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
     ? firebaseConfig.firestoreDatabaseId
     : undefined

@@ -34,6 +34,7 @@ import {
   Download,
   Plus,
   Minus,
+  Pencil,
   RotateCcw,
   FileSpreadsheet,
   MessageSquare,
@@ -201,6 +202,16 @@ export default function GuiaList({
     departamentoNome: string;
     tipo: "patronal" | "segurado";
     text: string;
+  } | null>(null);
+
+  const [editGuiaModal, setEditGuiaModal] = useState<{
+    guiaId: string;
+    deptNome: string;
+    tipo: "patronal" | "segurado";
+    target: "guia" | "comprovante";
+    descricaoFolha: string;
+    identificacaoGrcp: string;
+    valorStr: string;
   } | null>(null);
 
   // Carrega secretarias e departamentos (somente no carregamento inicial ou se departamentoId mudar)
@@ -445,6 +456,64 @@ export default function GuiaList({
     } catch (error) {
       console.error("Erro ao salvar observação:", error);
       showAlert("Erro", "Não foi possível salvar a observação.", "danger");
+    }
+  };
+
+  const handleOpenEditModal = (
+    guia: Guia,
+    deptNome: string,
+    target: "guia" | "comprovante" = "guia",
+  ) => {
+    const currentVal =
+      target === "comprovante"
+        ? (guia.valorPago !== undefined && guia.valorPago !== null ? guia.valorPago : (guia.valor || 0))
+        : (guia.valor || 0);
+
+    setEditGuiaModal({
+      guiaId: guia.id,
+      deptNome,
+      tipo: guia.tipo,
+      target,
+      descricaoFolha: guia.descricaoFolha || (guia.tipo === "patronal" ? "Patronal" : "Segurado"),
+      identificacaoGrcp: guia.identificacaoGrcp || "",
+      valorStr: formatBRL(currentVal),
+    });
+  };
+
+  const handleSaveEditGuia = async () => {
+    if (!editGuiaModal) return;
+    try {
+      const numVal = parseBRLToFloat(editGuiaModal.valorStr);
+      const updatePayload: Record<string, any> = {
+        descricaoFolha: editGuiaModal.descricaoFolha.trim(),
+        identificacaoGrcp: editGuiaModal.identificacaoGrcp.trim(),
+      };
+
+      if (editGuiaModal.target === "comprovante") {
+        updatePayload.valorPago = numVal;
+      } else {
+        updatePayload.valor = numVal;
+      }
+
+      await updateDoc(doc(db, "guias", editGuiaModal.guiaId), updatePayload);
+
+      setGuias((prev) =>
+        prev.map((g) => {
+          if (g.id === editGuiaModal.guiaId) {
+            return {
+              ...g,
+              ...updatePayload,
+            };
+          }
+          return g;
+        }),
+      );
+
+      showAlert("Sucesso", "Lançamento atualizado com sucesso!", "success");
+      setEditGuiaModal(null);
+    } catch (err) {
+      console.error("Erro ao salvar edição:", err);
+      showAlert("Erro", "Não foi possível salvar as alterações.", "danger");
     }
   };
 
@@ -1039,12 +1108,24 @@ export default function GuiaList({
                               <FileText className="w-4 h-4" />
                             </button>
                             {(role === "master" || role === "admin") && (
-                              <button
-                                onClick={() => handleDeleteGuia(patData.id)}
-                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteGuia(patData.id)}
+                                  className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                  title="Deletar Lançamento"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(patData, dept.nome, "guia")}
+                                  className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                  title="Editar Descrição / Valor"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              </div>
                             )}
                           </div>
                         ) : (
@@ -1082,7 +1163,7 @@ export default function GuiaList({
                       </td>
                       <td className="p-2 text-center">
                         {patData?.urlComprovante ? (
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => openDocument(patData.urlComprovante, patData.id, false, patData.onedriveComprovanteId)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
@@ -1090,6 +1171,16 @@ export default function GuiaList({
                             >
                               <CheckCircle className="w-4.5 h-4.5" />
                             </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(patData, dept.nome, "comprovante")}
+                                className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                title="Editar Descrição / Valor"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         ) : (
                           (role === "master" || role === "admin") ? (
@@ -1262,12 +1353,24 @@ export default function GuiaList({
                               <FileText className="w-4 h-4" />
                             </button>
                             {(role === "master" || role === "admin") && (
-                              <button
-                                onClick={() => handleDeleteGuia(segData.id)}
-                                className="w-5 h-5 text-rose-300 hover:text-rose-600 transition-colors"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteGuia(segData.id)}
+                                  className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                  title="Deletar Lançamento"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(segData, dept.nome, "guia")}
+                                  className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                  title="Editar Descrição / Valor"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              </div>
                             )}
                           </div>
                         ) : (
@@ -1305,7 +1408,7 @@ export default function GuiaList({
                       </td>
                       <td className="p-2 text-center">
                         {segData?.urlComprovante ? (
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => openDocument(segData.urlComprovante, segData.id, false, segData.onedriveComprovanteId)}
                               className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
@@ -1313,6 +1416,16 @@ export default function GuiaList({
                             >
                               <CheckCircle className="w-4.5 h-4.5" />
                             </button>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(segData, dept.nome, "comprovante")}
+                                className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                title="Editar Descrição / Valor"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         ) : (
                           (role === "master" || role === "admin") ? (
@@ -1734,6 +1847,102 @@ export default function GuiaList({
                     {loading ? "Subindo..." : "Confirmar e Enviar"}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL DE EDIÇÃO DE DESCRIÇÃO E VALOR */}
+        {editGuiaModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl border border-gray-100"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
+                  <Pencil className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900 tracking-tight">
+                    Editar Lançamento
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium">
+                    {editGuiaModal.deptNome} • <span className="capitalize">{editGuiaModal.tipo}</span> ({editGuiaModal.target === "guia" ? "Guia" : "Comprovante"})
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Descrição da Folha / Lançamento
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.descricaoFolha}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, descricaoFolha: e.target.value } : null,
+                      )
+                    }
+                    placeholder="Ex: Folha Mensal, Folha Complementar 1, etc."
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-bold focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Identificação GRCP
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.identificacaoGrcp}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, identificacaoGrcp: e.target.value } : null,
+                      )
+                    }
+                    placeholder="Ex: GRCP 123456"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-medium focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Valor (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={editGuiaModal.valorStr}
+                    onChange={(e) =>
+                      setEditGuiaModal((prev) =>
+                        prev ? { ...prev, valorStr: handleBRLChange(e.target.value) } : null,
+                      )
+                    }
+                    placeholder="0,00"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 font-mono font-bold focus:bg-white focus:border-blue-500 focus:outline-hidden transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setEditGuiaModal(null)}
+                  className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditGuia}
+                  className="px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
+                >
+                  Salvar Alterações
+                </button>
               </div>
             </motion.div>
           </div>

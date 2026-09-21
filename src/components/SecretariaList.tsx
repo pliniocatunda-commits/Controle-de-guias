@@ -116,7 +116,7 @@ export default function SecretariaList({
         createdAt: serverTimestamp()
       });
       fetchSecretarias();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao adicionar secretaria:", error);
       setSecretarias(prev => {
         const reverted = prev.filter(s => s.id !== newSecId);
@@ -124,6 +124,10 @@ export default function SecretariaList({
         return reverted;
       });
       fetchSecretarias(true);
+      const msg = error?.code === 'permission-denied'
+        ? 'Permissão negada. Certifique-se de que está autenticado com o e-mail administrador (Master).'
+        : `Não foi possível salvar a secretaria: ${error?.message || 'Falha de conexão com o banco'}`;
+      alert(msg);
     }
   };
 
@@ -148,9 +152,13 @@ export default function SecretariaList({
         sigla: updatedSigla
       });
       fetchSecretarias();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao atualizar secretaria:", error);
       fetchSecretarias(true);
+      const msg = error?.code === 'permission-denied'
+        ? 'Permissão negada para atualizar a secretaria.'
+        : `Erro ao atualizar secretaria: ${error?.message || 'Falha de conexão'}`;
+      alert(msg);
     }
   };
 
@@ -165,9 +173,13 @@ export default function SecretariaList({
     try {
       await deleteDoc(doc(db, 'secretarias', id));
       fetchSecretarias();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao excluir secretaria:", error);
       fetchSecretarias(true);
+      const msg = error?.code === 'permission-denied'
+        ? 'Permissão negada para excluir a secretaria.'
+        : `Erro ao excluir secretaria: ${error?.message || 'Falha de conexão'}`;
+      alert(msg);
     }
   };
 

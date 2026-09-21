@@ -36,6 +36,21 @@ async function startServer() {
     }
   };
 
+  // Verificação instantânea local de expiração do token JWT (0ms, sem requisições HTTP redundantes)
+  const isTokenExpired = (tokenString: string): boolean => {
+    try {
+      const parts = tokenString.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+        if (typeof payload.exp === "number") {
+          // Considera expirado se a validade já terminou ou expira nos próximos 30 segundos
+          return Date.now() >= (payload.exp * 1000 - 30000);
+        }
+      }
+    } catch (_) {}
+    return false;
+  };
+
   // Cache global para a configuração e tokens do OneDrive
   let onedriveCache: {
     clientId: string;
@@ -239,26 +254,11 @@ async function startServer() {
     const config = await getOneDriveConfig();
     let token = config.accessToken;
 
-    if (!token) {
+    if (!token || isTokenExpired(token)) {
       if (config.refreshToken) {
         token = await refreshOneDriveToken(config.refreshToken);
-      }
-    } else {
-      // Faz uma verificação de validade rápida com a API Graph de Microsoft
-      try {
-        const testRes = await fetchWithTimeout("https://graph.microsoft.com/v1.0/me", {
-          headers: { Authorization: `Bearer ${token}` }
-        }, 3000); // tempo de resposta agressivo de 3 segundos para validação silenciosa
-        if (testRes.status === 401) {
-          console.log("[Backend] O token em cache expirou. Renovando silenciosamente...");
-          if (config.refreshToken) {
-            token = await refreshOneDriveToken(config.refreshToken);
-          } else {
-            token = null;
-          }
-        }
-      } catch (testErr) {
-        console.error("[Backend] Falha na requisição de validação do token:", testErr);
+      } else {
+        token = null;
       }
     }
 
@@ -596,19 +596,10 @@ async function startServer() {
     }
 
     if (token) {
-      // Verifica de forma resiliente e silenciosa se o token individual ainda é válido antes de retorná-lo
-      try {
-        const testRes = await fetchWithTimeout("https://graph.microsoft.com/v1.0/me", {
-          headers: { Authorization: `Bearer ${token}` }
-        }, 3000);
-        
-        if (testRes.status !== 401) {
-          return { token };
-        }
-        console.log("[getValidToken] Token individual expirado ou inválido (401). Forçando renovação...");
+      if (isTokenExpired(token)) {
+        console.log("[getValidToken] Token individual expirado pelo timestamp JWT. Forçando renovação...");
         token = null; // Zera para prosseguir ao passo 2 de renovação
-      } catch (testErr) {
-        console.error("[getValidToken] Falha de rede temporária ao testar token. Assumindo válido para evitar bloqueios:", testErr);
+      } else {
         return { token };
       }
     }
