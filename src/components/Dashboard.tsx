@@ -77,6 +77,7 @@ export default function Dashboard() {
   const [selectedMes, setSelectedMes] = useState<number | 'todos'>(new Date().getMonth() + 1);
   const [selectedAno, setSelectedAno] = useState<number | 'todos'>(new Date().getFullYear());
   const [selectedRegime, setSelectedRegime] = useState<'todos' | 'capitalizado' | 'financeiro'>('todos');
+  const [selectedSecretariaId, setSelectedSecretariaId] = useState<string>('todos');
 
   useEffect(() => {
     async function fetchData() {
@@ -90,7 +91,9 @@ export default function Dashboard() {
           getDocs(collection(db, 'comprovantes'))
         ]);
 
-        const secsData = secsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Secretaria);
+        const secsData = secsSnapshot.docs
+          .map(d => ({ id: d.id, ...d.data() }) as Secretaria)
+          .sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
         setSecretarias(secsData);
 
         const deptsData = deptsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }) as Departamento);
@@ -148,21 +151,36 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  const deptSecMap = new Map(departamentos.map(d => [d.id, d.secretariaId]));
+  const allGuiasMap = new Map(allGuias.map(g => [g.id, g]));
+
+  const matchesSecretaria = (departamentoId?: string): boolean => {
+    if (selectedSecretariaId === 'todos') return true;
+    if (!departamentoId) return false;
+    return deptSecMap.get(departamentoId) === selectedSecretariaId;
+  };
+
   // Filter lists based on selected criteria with robust type safety
   const filteredGuias = allGuias.filter(g => {
     const matchMes = selectedMes === 'todos' || Number(g.mes) === Number(selectedMes);
     const matchAno = selectedAno === 'todos' || Number(g.ano) === Number(selectedAno);
     const matchRegime = selectedRegime === 'todos' || (g.regime || 'capitalizado') === selectedRegime;
-    return matchMes && matchAno && matchRegime;
+    const matchSecretaria = matchesSecretaria(g.departamentoId);
+    return matchMes && matchAno && matchRegime && matchSecretaria;
   });
 
   const filteredComprovantes = allComprovantes.filter(c => {
     const matchMes = selectedMes === 'todos' || Number(c.mes) === Number(selectedMes);
     const matchAno = selectedAno === 'todos' || Number(c.ano) === Number(selectedAno);
-    const linkedGuia = c.guiaId ? allGuias.find(g => g.id === c.guiaId) : null;
+    const linkedGuia = c.guiaId ? allGuiasMap.get(c.guiaId) : null;
     const compRegime = c.regime || (linkedGuia && linkedGuia.regime) || 'capitalizado';
     const matchRegime = selectedRegime === 'todos' || compRegime === selectedRegime;
-    return matchMes && matchAno && matchRegime;
+    const compDeptId = (c as any).departamentoId || linkedGuia?.departamentoId;
+    const compSecId = (c as any).secretariaId;
+    const matchSecretaria =
+      selectedSecretariaId === 'todos' ||
+      (compSecId ? compSecId === selectedSecretariaId : matchesSecretaria(compDeptId));
+    return matchMes && matchAno && matchRegime && matchSecretaria;
   });
 
   // Calculate high-level KPIs based on the filtered records
@@ -244,14 +262,15 @@ export default function Dashboard() {
     { name: 'Dez', valor: 0 },
   ];
 
-  // Populate monthly trends from guides matching active Year, Regime & Month filters
+  // Populate monthly trends from guides matching active Year, Regime, Month & Secretaria filters
   allGuias.forEach(g => {
     const matchAno = selectedAno === 'todos' || Number(g.ano) === Number(selectedAno);
     const compRegime = g.regime || 'capitalizado';
     const matchRegime = selectedRegime === 'todos' || compRegime === selectedRegime;
     const matchMes = selectedMes === 'todos' || Number(g.mes) === Number(selectedMes);
+    const matchSecretaria = matchesSecretaria(g.departamentoId);
 
-    if (matchAno && matchRegime && matchMes) {
+    if (matchAno && matchRegime && matchMes && matchSecretaria) {
       const mesNum = Number(g.mes);
       if (mesNum >= 1 && mesNum <= 12 && g.status === 'pago') {
         const val = g.valorPago || g.valor || 0;
@@ -313,22 +332,26 @@ export default function Dashboard() {
         </header>
 
         {/* Shimmer Filter row */}
-        <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col lg:flex-row gap-5 items-start lg:items-center justify-between">
-          <div className="flex flex-row flex-wrap sm:flex-nowrap gap-4 items-end w-full lg:w-auto">
-            <div className="space-y-2 flex-1 sm:flex-initial min-w-[140px]">
+        <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-3.5">
+          <div className="flex flex-row flex-wrap md:flex-nowrap gap-4 items-end w-full">
+            <div className="space-y-2 flex-1 md:flex-initial min-w-[140px]">
               <div className="h-3 w-16 bg-gray-200/50 rounded animate-pulse" />
               <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
             </div>
-            <div className="space-y-2 flex-1 sm:flex-initial min-w-[110px]">
+            <div className="space-y-2 flex-1 md:flex-initial min-w-[110px]">
               <div className="h-3 w-12 bg-gray-200/50 rounded animate-pulse" />
               <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
             </div>
-            <div className="space-y-2 flex-1 sm:flex-initial min-w-[140px]">
+            <div className="space-y-2 flex-1 md:flex-initial min-w-[140px]">
               <div className="h-3 w-14 bg-gray-200/50 rounded animate-pulse" />
               <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
             </div>
+            <div className="space-y-2 flex-1 min-w-[220px] md:max-w-[340px]">
+              <div className="h-3 w-20 bg-gray-200/50 rounded animate-pulse" />
+              <div className="h-9 w-full bg-gray-100/70 rounded-xl animate-pulse" />
+            </div>
           </div>
-          <div className="h-8 w-72 bg-amber-50/50 rounded-xl border border-amber-100/30 animate-pulse" />
+          <div className="h-7 w-72 bg-amber-50/50 rounded-lg border border-amber-100/30 animate-pulse" />
         </section>
 
         {/* Shimmer Cards Grid */}
@@ -407,9 +430,9 @@ export default function Dashboard() {
       </header>
 
       {/* Filter Row */}
-      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col lg:flex-row gap-5 items-start lg:items-center justify-between">
-        <div className="flex flex-row flex-wrap sm:flex-nowrap gap-4 items-end w-full lg:w-auto">
-          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
+      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-3.5">
+        <div className="flex flex-row flex-wrap md:flex-nowrap gap-4 items-end w-full">
+          <div className="flex flex-col gap-1.5 flex-1 md:flex-initial min-w-[140px]">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Mês de Ref.</span>
             <select 
               value={selectedMes} 
@@ -435,7 +458,7 @@ export default function Dashboard() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[110px]">
+          <div className="flex flex-col gap-1.5 flex-1 md:flex-initial min-w-[110px]">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Ano Fiscal</span>
             <select 
               value={selectedAno} 
@@ -452,7 +475,7 @@ export default function Dashboard() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
+          <div className="flex flex-col gap-1.5 flex-1 md:flex-initial min-w-[140px]">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Regime</span>
             <select 
               value={selectedRegime} 
@@ -466,9 +489,27 @@ export default function Dashboard() {
               <option value="financeiro">Financeiro</option>
             </select>
           </div>
+
+          <div className="flex flex-col gap-1.5 flex-1 min-w-[220px] md:max-w-[360px]">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Secretaria</span>
+            <select
+              value={selectedSecretariaId}
+              onChange={(e) => {
+                setSelectedSecretariaId(e.target.value);
+              }}
+              className="bg-gray-50 border border-gray-200 text-gray-900 text-sm font-semibold rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all cursor-pointer w-full"
+            >
+              <option value="todos">Todas as Secretarias</option>
+              {secretarias.map((sec) => (
+                <option key={sec.id} value={sec.id}>
+                  {sec.sigla ? `${sec.sigla} - ${sec.nome}` : sec.nome}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div className="text-xs text-amber-600 font-bold bg-amber-50/50 border border-amber-100 py-1.5 px-3 rounded-lg flex items-center gap-1.5 self-stretch sm:self-auto text-center justify-center">
+        <div className="text-xs text-amber-600 font-bold bg-amber-50/50 border border-amber-100 py-1.5 px-3 rounded-lg flex items-center gap-1.5 w-fit">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
           Filtros ativos determinam as métricas exibidas nos painéis
         </div>
@@ -780,7 +821,7 @@ export default function Dashboard() {
                       Diagnóstico de Divergências
                     </h3>
                     <p className="text-xs text-gray-500 mt-1">
-                      Período: <strong className="text-slate-800">{selectedMes === 'todos' ? 'Todos os Meses' : getNomeMes(selectedMes)}/{selectedAno === 'todos' ? 'Todos os Anos' : selectedAno}</strong> {selectedRegime !== 'todos' && `| Regime: ${selectedRegime}`}
+                      Período: <strong className="text-slate-800">{selectedMes === 'todos' ? 'Todos os Meses' : getNomeMes(selectedMes)}/{selectedAno === 'todos' ? 'Todos os Anos' : selectedAno}</strong> {selectedRegime !== 'todos' && `| Regime: ${selectedRegime}`} {selectedSecretariaId !== 'todos' && `| Secretaria: ${secretarias.find(s => s.id === selectedSecretariaId)?.sigla || secretarias.find(s => s.id === selectedSecretariaId)?.nome || ''}`}
                     </p>
                   </div>
                 </div>

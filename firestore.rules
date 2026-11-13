@@ -99,15 +99,15 @@ service cloud.firestore {
     // --- Collection Rules ---
 
     match /usuarios/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isMasterEmail());
-      allow list: if isAdmin() || isMasterEmail();
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isMasterEmail() || request.auth.token.email == resource.data.email);
+      allow list: if isSignedIn() && (isAdmin() || isMasterEmail() || request.auth.token.email == resource.data.email);
       allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isMasterEmail()) && isValidUsuario(incoming());
       allow update: if isSignedIn() && (
         (request.auth.uid == userId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['nome'])) ||
         isAdmin() ||
         isMasterEmail()
       );
-      allow delete: if isAdmin() || isMasterEmail();
+      allow delete: if isAdmin() || isMasterEmail() || (isSignedIn() && request.auth.token.email == resource.data.email);
     }
 
     match /secretarias/{secId} {

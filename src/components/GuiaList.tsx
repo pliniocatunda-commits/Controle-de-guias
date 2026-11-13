@@ -124,8 +124,11 @@ export default function GuiaList({
   >("capitalizado");
   const [oneDrivePickContext, setOneDrivePickContext] = useState<{
     deptId: string;
+    deptNome?: string;
     tipo: "patronal" | "segurado";
     target: "guia" | "comprovante";
+    complementarId?: string;
+    descricaoFolha?: string;
   } | null>(null);
 
   const [isRelatorioOpen, setIsRelatorioOpen] = useState(false);
@@ -182,7 +185,12 @@ export default function GuiaList({
     deptId: string;
     tipo: "patronal" | "segurado";
     target: "guia" | "comprovante";
+    complementarId?: string;
+    descricaoFolha?: string;
   } | null>(null);
+  const [draftComplementares, setDraftComplementares] = useState<
+    Record<string, Array<{ id: string; descricao: string }>>
+  >({});
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploadForm, setUploadForm] = useState({
     valor: 0,
@@ -202,6 +210,8 @@ export default function GuiaList({
     departamentoNome: string;
     tipo: "patronal" | "segurado";
     text: string;
+    complementarId?: string;
+    descricaoFolha?: string;
   } | null>(null);
 
   const [editGuiaModal, setEditGuiaModal] = useState<{
@@ -212,6 +222,13 @@ export default function GuiaList({
     descricaoFolha: string;
     identificacaoGrcp: string;
     valorStr: string;
+    complementarId?: string;
+  } | null>(null);
+
+  const [editDraftCompModal, setEditDraftCompModal] = useState<{
+    deptId: string;
+    compId: string;
+    descricao: string;
   } | null>(null);
 
   // Carrega secretarias e departamentos (somente no carregamento inicial ou se departamentoId mudar)
@@ -412,6 +429,8 @@ export default function GuiaList({
     deptId: string,
     tipo: "patronal" | "segurado",
     text: string,
+    complementarId?: string,
+    descricaoFolha?: string,
   ) => {
     try {
       if (guiaId) {
@@ -423,7 +442,7 @@ export default function GuiaList({
         );
       } else {
         // Criar uma guia pendente com valor 0 para guardar a observação
-        const docRef = await addDoc(collection(db, "guias"), {
+        const newDocData: any = {
           departamentoId: deptId,
           mes: mesReferencia,
           ano: anoFiscal,
@@ -432,21 +451,20 @@ export default function GuiaList({
           status: "pendente",
           tipo,
           regime: activeRegime,
+          tipoFolha: complementarId ? "complementar" : "normal",
+          complementarId: complementarId || null,
+          descricaoFolha:
+            descricaoFolha ||
+            (complementarId ? "Folha Complementar" : "Folha Normal"),
           observacao: text,
           createdAt: serverTimestamp(),
-        });
+        };
+
+        const docRef = await addDoc(collection(db, "guias"), newDocData);
         
         const newGuia: Guia = {
           id: docRef.id,
-          departamentoId: deptId,
-          mes: mesReferencia,
-          ano: anoFiscal,
-          valor: 0,
-          vencimento: format(new Date(anoFiscal, mesReferencia - 1, 10), "yyyy-MM-dd"),
-          status: "pendente",
-          tipo,
-          regime: activeRegime,
-          observacao: text,
+          ...newDocData,
           createdAt: new Date(),
         };
         setGuias((prev) => [...prev, newGuia]);
@@ -477,32 +495,74 @@ export default function GuiaList({
       descricaoFolha: guia.descricaoFolha || (guia.tipo === "patronal" ? "Patronal" : "Segurado"),
       identificacaoGrcp: guia.identificacaoGrcp || "",
       valorStr: formatBRL(currentVal),
+      complementarId: guia.complementarId,
     });
   };
 
   const handleSaveEditGuia = async () => {
     if (!editGuiaModal) return;
+    const { guiaId, valorStr, identificacaoGrcp, descricaoFolha, target, complementarId } = editGuiaModal;
     try {
-      const numVal = parseBRLToFloat(editGuiaModal.valorStr);
+      const numVal = parseBRLToFloat(valorStr);
       const updatePayload: Record<string, any> = {
-        descricaoFolha: editGuiaModal.descricaoFolha.trim(),
-        identificacaoGrcp: editGuiaModal.identificacaoGrcp.trim(),
+        descricaoFolha: descricaoFolha.trim(),
+        identificacaoGrcp: identificacaoGrcp.trim(),
       };
 
-      if (editGuiaModal.target === "comprovante") {
+      if (target === "comprovante") {
         updatePayload.valorPago = numVal;
+        const currentGuia = guias.find((g) => g.id === guiaId);
+        if (!currentGuia?.valor || currentGuia.valor === 0) {
+          updatePayload.valor = numVal;
+        }
       } else {
         updatePayload.valor = numVal;
+        const currentGuia = guias.find((g) => g.id === guiaId);
+        if (!currentGuia?.valorPago || currentGuia.valorPago === 0) {
+          updatePayload.valorPago = numVal;
+        }
       }
 
-      await updateDoc(doc(db, "guias", editGuiaModal.guiaId), updatePayload);
+      await updateDoc(doc(db, "guias", guiaId), updatePayload);
+
+      if (complementarId && descricaoFolha.trim()) {
+        const sisterGuias = guias.filter(
+          (g) => g.complementarId === complementarId && g.id !== guiaId,
+        );
+        for (const sg of sisterGuias) {
+          await updateDoc(doc(db, "guias", sg.id), {
+            descricaoFolha: descricaoFolha.trim(),
+          });
+        }
+        setDraftComplementares((prev) => {
+          const next = { ...prev };
+          for (const dId in next) {
+            next[dId] = (next[dId] || []).map((c) =>
+              c.id === complementarId
+                ? { ...c, descricao: descricaoFolha.trim() }
+                : c,
+            );
+          }
+          return next;
+        });
+      }
 
       setGuias((prev) =>
         prev.map((g) => {
-          if (g.id === editGuiaModal.guiaId) {
+          if (g.id === guiaId) {
             return {
               ...g,
               ...updatePayload,
+            };
+          }
+          if (
+            complementarId &&
+            g.complementarId === complementarId &&
+            descricaoFolha.trim()
+          ) {
+            return {
+              ...g,
+              descricaoFolha: descricaoFolha.trim(),
             };
           }
           return g;
@@ -517,13 +577,54 @@ export default function GuiaList({
     }
   };
 
+  const handleEditComplementarDescricao = (
+    deptId: string,
+    comp: { id: string; descricao: string },
+  ) => {
+    const compPat = getGuiaData(deptId, "patronal", comp.id);
+    const compSeg = getGuiaData(deptId, "segurado", comp.id);
+    const targetGuia = compPat || compSeg;
+    const dept = departamentos.find((d) => d.id === deptId);
+
+    if (targetGuia) {
+      handleOpenEditModal(
+        targetGuia,
+        `${dept?.nome || "Departamento"} (${comp.descricao})`,
+        "guia",
+      );
+    } else {
+      setEditDraftCompModal({
+        deptId,
+        compId: comp.id,
+        descricao: comp.descricao,
+      });
+    }
+  };
+
+  const handleSaveDraftComplementar = () => {
+    if (!editDraftCompModal) return;
+    const { deptId, compId, descricao } = editDraftCompModal;
+    const trimmed = descricao.trim();
+    if (!trimmed) return;
+    setDraftComplementares((prev) => ({
+      ...prev,
+      [deptId]: (prev[deptId] || []).map((c) =>
+        c.id === compId ? { ...c, descricao: trimmed } : c,
+      ),
+    }));
+    setEditDraftCompModal(null);
+    showAlert("Sucesso", "Descrição atualizada.", "success");
+  };
+
   const triggerUpload = (
     deptId: string,
     tipo: "patronal" | "segurado",
     target: "guia" | "comprovante",
+    complementarId?: string,
+    descricaoFolha?: string,
   ) => {
     if (role !== "master" && role !== "admin") return;
-    setUploadContext({ deptId, tipo, target });
+    setUploadContext({ deptId, tipo, target, complementarId, descricaoFolha });
     fileInputRef.current?.click();
   };
 
@@ -532,11 +633,10 @@ export default function GuiaList({
     if (!file || !uploadContext) return;
 
     // Abrir modal de conferência
-    const existingGuia = guias.find(
-      (g) =>
-        g.departamentoId === uploadContext.deptId &&
-        g.tipo === uploadContext.tipo &&
-        (g.regime || "capitalizado") === activeRegime,
+    const existingGuia = getGuiaData(
+      uploadContext.deptId,
+      uploadContext.tipo,
+      uploadContext.complementarId,
     );
     const initialVal =
       uploadContext.target === "guia"
@@ -606,11 +706,10 @@ export default function GuiaList({
       // Upload para Firebase Storage
       const downloadUrl = await uploadFile(pendingFile, "guias");
 
-      let guia = guias.find(
-        (g) =>
-          g.departamentoId === uploadContext.deptId &&
-          g.tipo === uploadContext.tipo &&
-          (g.regime || "capitalizado") === activeRegime,
+      const guia = getGuiaData(
+        uploadContext.deptId,
+        uploadContext.tipo,
+        uploadContext.complementarId,
       );
       const urlFieldName =
         uploadContext.target === "guia" ? "urlGuia" : "urlComprovante";
@@ -632,7 +731,7 @@ export default function GuiaList({
         await updateDoc(doc(db, "guias", guia.id), payload);
         setGuias((prev) =>
           prev.map((g) =>
-            g.id === guia!.id ? normalizeGuia({ ...g, ...payload }) : g,
+            g.id === guia.id ? normalizeGuia({ ...g, ...payload }) : g,
           ),
         );
       } else {
@@ -642,6 +741,13 @@ export default function GuiaList({
           mes: mesReferencia,
           ano: anoFiscal,
           regime: activeRegime,
+          tipoFolha: uploadContext.complementarId ? "complementar" : "normal",
+          complementarId: uploadContext.complementarId || null,
+          descricaoFolha:
+            uploadContext.descricaoFolha ||
+            (uploadContext.complementarId
+              ? "Folha Complementar"
+              : "Folha Normal"),
           nome: pendingFile.name.split(".")[0],
           valor: uploadContext.target === "guia" ? uploadForm.valor : 0,
           valorPago:
@@ -757,13 +863,158 @@ export default function GuiaList({
     showAlert("Download", "Iniciando download do arquivo...", "success");
   };
 
-  const getGuiaData = (deptId: string, tipo: "patronal" | "segurado") => {
-    return guias.find(
-      (g) =>
+  const getGuiaData = (
+    deptId: string,
+    tipo: "patronal" | "segurado",
+    complementarId?: string,
+  ) => {
+    return guias.find((g) => {
+      const matchBasic =
         g.departamentoId === deptId &&
         g.tipo === tipo &&
-        (g.regime || "capitalizado") === activeRegime,
+        (g.regime || "capitalizado") === activeRegime;
+      if (!matchBasic) return false;
+      if (complementarId) {
+        return (
+          g.complementarId === complementarId ||
+          `comp_${g.id}` === complementarId
+        );
+      }
+      return (!g.tipoFolha || g.tipoFolha === "normal") && !g.complementarId;
+    });
+  };
+
+  const getComplementarGroups = (deptId: string) => {
+    const dbComplementares = guias.filter(
+      (g) =>
+        g.departamentoId === deptId &&
+        (g.regime || "capitalizado") === activeRegime &&
+        (g.tipoFolha === "complementar" || Boolean(g.complementarId)),
     );
+
+    const map = new Map<string, { id: string; descricao: string }>();
+
+    dbComplementares.forEach((g) => {
+      const compId = g.complementarId || `comp_${g.id}`;
+      if (!map.has(compId)) {
+        map.set(compId, {
+          id: compId,
+          descricao: g.descricaoFolha || "Folha Complementar",
+        });
+      }
+    });
+
+    (draftComplementares[deptId] || []).forEach((draft) => {
+      if (!map.has(draft.id)) {
+        map.set(draft.id, draft);
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
+  const handleAddComplementar = (deptId: string) => {
+    if (role !== "master" && role !== "admin") return;
+    const existing = getComplementarGroups(deptId);
+    const nextNum = existing.length + 1;
+    const newCompId = `comp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const descricao = `Folha Complementar ${nextNum > 1 ? nextNum : ""}`.trim();
+
+    setDraftComplementares((prev) => ({
+      ...prev,
+      [deptId]: [...(prev[deptId] || []), { id: newCompId, descricao }],
+    }));
+  };
+
+  const handleDeleteComplementar = (deptId: string, complementarId: string) => {
+    if (role !== "master" && role !== "admin") return;
+    askConfirmation(
+      "Excluir Folha Complementar",
+      "Deseja realmente remover esta folha complementar e todos os seus registros vinculados (guias e comprovantes)?",
+      "danger",
+      async () => {
+        try {
+          const toDelete = guias.filter(
+            (g) =>
+              g.departamentoId === deptId &&
+              (g.complementarId === complementarId ||
+                `comp_${g.id}` === complementarId),
+          );
+          for (const g of toDelete) {
+            await deleteDoc(doc(db, "guias", g.id));
+          }
+          setGuias((prev) =>
+            prev.filter((g) => !toDelete.some((d) => d.id === g.id)),
+          );
+          setDraftComplementares((prev) => ({
+            ...prev,
+            [deptId]: (prev[deptId] || []).filter(
+              (c) => c.id !== complementarId,
+            ),
+          }));
+          showAlert("Sucesso", "Folha complementar removida.", "success");
+        } catch (error) {
+          console.error("Erro ao remover folha complementar:", error);
+          showAlert("Erro", "Falha ao remover folha complementar.", "danger");
+        }
+      },
+    );
+  };
+
+  const handleInlineOrCreate = async (
+    deptId: string,
+    tipo: "patronal" | "segurado",
+    existingGuia: Guia | undefined,
+    field: "identificacaoGrcp" | "valor",
+    value: any,
+    complementarId?: string,
+    descricaoFolha?: string,
+    debounceMs = 500,
+  ) => {
+    if (role !== "master" && role !== "admin") return;
+
+    if (existingGuia) {
+      handleInlineUpdate(existingGuia.id, field, value, debounceMs);
+      return;
+    }
+
+    try {
+      const isComp = Boolean(complementarId);
+      const newDocData: any = {
+        departamentoId: deptId,
+        tipo,
+        mes: mesReferencia,
+        ano: anoFiscal,
+        regime: activeRegime,
+        tipoFolha: isComp ? "complementar" : "normal",
+        complementarId: complementarId || null,
+        descricaoFolha:
+          descricaoFolha ||
+          (isComp ? "Folha Complementar" : "Folha Normal"),
+        valor:
+          field === "valor"
+            ? typeof value === "number"
+              ? value
+              : parseBRLToFloat(value)
+            : 0,
+        status: "pendente",
+        identificacaoGrcp: field === "identificacaoGrcp" ? value : "",
+        vencimento: new Date(anoFiscal, mesReferencia, 0)
+          .toISOString()
+          .split("T")[0],
+        createdAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, "guias"), newDocData);
+      const createdGuia: Guia = {
+        id: docRef.id,
+        ...newDocData,
+        createdAt: new Date(),
+      };
+      setGuias((prev) => [...prev, normalizeGuia(createdGuia)]);
+    } catch (err) {
+      console.error("Erro ao criar guia inline:", err);
+    }
   };
 
   return (
@@ -968,523 +1219,1420 @@ export default function GuiaList({
                   const patData = getGuiaData(dept.id, "patronal");
                   const segData = getGuiaData(dept.id, "segurado");
                   const sec = secretarias.find((s) => s.id === dept.secretariaId);
+                  const compGroups = getComplementarGroups(dept.id);
 
                   return (
-                    <tr
-                      key={dept.id}
-                      className="hover:bg-gray-50 transition-colors group"
-                    >
-                      <td className="py-3 px-6 border-r border-gray-200 max-w-[240px]">
-                        {sec && (
-                          <div className="mb-0.5">
-                            <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded-md font-extrabold text-[8px] uppercase tracking-wider">
-                              {sec.sigla || sec.nome}
-                            </span>
-                          </div>
-                        )}
-                        <p className="font-black text-gray-900 text-[10px] tracking-tight leading-normal whitespace-normal break-words">
-                          {dept.nome}
-                        </p>
-                        {dept.onedriveFolderId && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <Cloud className="w-3 h-3 text-emerald-500" />
-                            <span className="text-[8px] font-bold text-emerald-600 uppercase">
-                              Vinculado
-                            </span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* PATRONAL SECTION */}
-                      <td className="p-2 px-4 min-w-[140px]">
-                        <div className="min-h-[1.5rem] flex items-center">
-                          {patData ? (
-                            <input
-                              type="text"
-                              disabled={role !== "master" && role !== "admin"}
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={
-                                tempGrcp[patData.id] !== undefined
-                                  ? tempGrcp[patData.id]
-                                  : (patData.identificacaoGrcp || "")
-                              }
-                              placeholder="Identificação..."
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setTempGrcp((prev) => ({
-                                  ...prev,
-                                  [patData.id]: val,
-                                }));
-                                handleInlineUpdate(
-                                  patData.id,
-                                  "identificacaoGrcp",
-                                  val,
-                                  600,
-                                );
-                              }}
-                              onBlur={(e) => {
-                                const val = e.target.value;
-                                flushInlineUpdate(
-                                  patData.id,
-                                  "identificacaoGrcp",
-                                  val,
-                                );
-                                setTempGrcp((prev) => {
-                                  const next = { ...prev };
-                                  delete next[patData.id];
-                                  return next;
-                                });
-                              }}
-                            />
-                          ) : (
-                            <span className="text-gray-200 text-[8px]">
-                              ---
-                            </span>
+                    <React.Fragment key={dept.id}>
+                      <tr className="hover:bg-gray-50 transition-colors group">
+                        <td className="py-3 px-6 border-r border-gray-200 max-w-[240px]">
+                          {sec && (
+                            <div className="mb-0.5">
+                              <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded-md font-extrabold text-[8px] uppercase tracking-wider">
+                                {sec.sigla || sec.nome}
+                              </span>
+                            </div>
                           )}
-                        </div>
-                      </td>
-                      <td className="p-2 px-4 min-w-[100px]">
-                        {patData ? (
-                          <div className="flex items-center gap-0.5">
-                            <span className="font-black text-gray-900 text-[10px]">
-                              R$
-                            </span>
-                            <input
-                              type="text"
-                              disabled={role !== "master" && role !== "admin"}
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
-                              value={
-                                tempValues[patData.id] !== undefined
-                                  ? tempValues[patData.id]
-                                  : formatBRL(patData.valor)
-                              }
-                              onFocus={() => {
-                                setTempValues((prev) => ({
-                                  ...prev,
-                                  [patData.id]: formatBRL(patData.valor),
-                                }));
-                              }}
-                              onChange={(e) => {
-                                const typed = e.target.value;
-                                setTempValues((prev) => ({
-                                  ...prev,
-                                  [patData.id]: typed,
-                                }));
-                                const numVal = parseBRLToFloat(typed);
-                                handleInlineUpdate(
-                                  patData.id,
-                                  "valor",
-                                  numVal,
-                                  600,
-                                );
-                              }}
-                              onBlur={(e) => {
-                                const typed =
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-black text-gray-900 text-[10px] tracking-tight leading-normal whitespace-normal break-words">
+                              {dept.nome}
+                            </p>
+                            {(role === "master" || role === "admin") && (
+                              <button
+                                type="button"
+                                onClick={() => handleAddComplementar(dept.id)}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[8px] font-black rounded border border-indigo-200 transition-colors shrink-0 shadow-2xs"
+                                title="Adicionar Folha Complementar"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                                <span>Folha</span>
+                              </button>
+                            )}
+                          </div>
+                          {dept.onedriveFolderId && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <Cloud className="w-3 h-3 text-emerald-500" />
+                              <span className="text-[8px] font-bold text-emerald-600 uppercase">
+                                Vinculado
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* PATRONAL SECTION */}
+                        <td className="p-2 px-4 min-w-[140px]">
+                          <div className="min-h-[1.5rem] flex items-center">
+                            {patData ? (
+                              <input
+                                type="text"
+                                disabled={role !== "master" && role !== "admin"}
+                                className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
+                                value={
+                                  tempGrcp[patData.id] !== undefined
+                                    ? tempGrcp[patData.id]
+                                    : (patData.identificacaoGrcp || "")
+                                }
+                                placeholder="Identificação..."
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setTempGrcp((prev) => ({
+                                    ...prev,
+                                    [patData.id]: val,
+                                  }));
+                                  handleInlineUpdate(
+                                    patData.id,
+                                    "identificacaoGrcp",
+                                    val,
+                                    600,
+                                  );
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value;
+                                  flushInlineUpdate(
+                                    patData.id,
+                                    "identificacaoGrcp",
+                                    val,
+                                  );
+                                  setTempGrcp((prev) => {
+                                    const next = { ...prev };
+                                    delete next[patData.id];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <span className="text-gray-200 text-[8px]">
+                                ---
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-2 px-4 min-w-[100px]">
+                          {patData ? (
+                            <div className="flex items-center gap-0.5">
+                              <span className="font-black text-gray-900 text-[10px]">
+                                R$
+                              </span>
+                              <input
+                                type="text"
+                                disabled={role !== "master" && role !== "admin"}
+                                className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
+                                value={
                                   tempValues[patData.id] !== undefined
                                     ? tempValues[patData.id]
-                                    : e.target.value;
-                                const numVal = parseBRLToFloat(typed);
-                                flushInlineUpdate(patData.id, "valor", numVal);
-                                setTempValues((prev) => {
-                                  const next = { ...prev };
-                                  delete next[patData.id];
-                                  return next;
-                                });
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <span className="text-gray-200 text-[8px]">---</span>
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        {patData?.urlGuia ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openDocument(patData.urlGuia, patData.id, true, patData.onedriveGuiaId)}
-                              className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
-                              title="Visualizar"
-                            >
-                              <FileText className="w-4 h-4" />
-                            </button>
-                            {(role === "master" || role === "admin") && (
-                              <div className="flex flex-col items-center justify-center gap-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteGuia(patData.id)}
-                                  className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
-                                  title="Deletar Lançamento"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditModal(patData, dept.nome, "guia")}
-                                  className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
-                                  title="Editar Descrição / Valor"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          (role === "master" || role === "admin") ? (
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() =>
-                                  triggerUpload(dept.id, "patronal", "guia")
+                                    : formatBRL(patData.valor)
                                 }
-                                className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
-                                title="Upload Manual"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                              {dept.onedriveFolderId && (
-                                <button
-                                  onClick={() =>
-                                    setOneDrivePickContext({
-                                      deptId: dept.id,
-                                      tipo: "patronal",
-                                      target: "guia",
-                                    })
-                                  }
-                                  className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                  title="Vincular do OneDrive"
-                                >
-                                  <Cloud size={14} />
-                                </button>
-                              )}
+                                onFocus={() => {
+                                  setTempValues((prev) => ({
+                                    ...prev,
+                                    [patData.id]: formatBRL(patData.valor),
+                                  }));
+                                }}
+                                onChange={(e) => {
+                                  const typed = e.target.value;
+                                  setTempValues((prev) => ({
+                                    ...prev,
+                                    [patData.id]: typed,
+                                  }));
+                                  const numVal = parseBRLToFloat(typed);
+                                  handleInlineUpdate(
+                                    patData.id,
+                                    "valor",
+                                    numVal,
+                                    600,
+                                  );
+                                }}
+                                onBlur={(e) => {
+                                  const typed =
+                                    tempValues[patData.id] !== undefined
+                                      ? tempValues[patData.id]
+                                      : e.target.value;
+                                  const numVal = parseBRLToFloat(typed);
+                                  flushInlineUpdate(patData.id, "valor", numVal);
+                                  setTempValues((prev) => {
+                                    const next = { ...prev };
+                                    delete next[patData.id];
+                                    return next;
+                                  });
+                                }}
+                              />
                             </div>
                           ) : (
-                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
-                          )
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        {patData?.urlComprovante ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openDocument(patData.urlComprovante, patData.id, false, patData.onedriveComprovanteId)}
-                              className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
-                              title="Visualizar Comprovante"
-                            >
-                              <CheckCircle className="w-4.5 h-4.5" />
-                            </button>
-                            {(role === "master" || role === "admin") && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditModal(patData, dept.nome, "comprovante")}
-                                className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
-                                title="Editar Descrição / Valor"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          (role === "master" || role === "admin") ? (
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() =>
-                                  triggerUpload(dept.id, "patronal", "comprovante")
-                                }
-                                className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
-                                title="Upload Comprovante"
-                              >
-                                <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
-                              </button>
-                              {dept.onedriveFolderId && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setOneDrivePickContext({
-                                      deptId: dept.id,
-                                      tipo: "patronal",
-                                      target: "comprovante",
-                                    })
-                                  }
-                                  className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                  title="Vincular Comprovante do OneDrive"
-                                >
-                                  <Cloud size={12} />
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300 text-[10px]">—</span>
-                          )
-                        )}
-                      </td>
-                      <td className="p-2 text-center border-r border-gray-200">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setObsModalConfig({
-                              isOpen: true,
-                              guiaId: patData?.id || null,
-                              deptId: dept.id,
-                              departamentoNome: dept.nome,
-                              tipo: "patronal",
-                              text: patData?.observacao || "",
-                            })
-                          }
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                            patData?.observacao
-                              ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
-                              : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
-                          }`}
-                          title={patData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      </td>
-
-                      {/* SEGURADOS SECTION */}
-                      <td className="p-2 px-4 min-w-[140px]">
-                        <div className="min-h-[1.5rem] flex items-center">
-                          {segData ? (
-                            <input
-                              type="text"
-                              disabled={role !== "master" && role !== "admin"}
-                              className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
-                              value={
-                                tempGrcp[segData.id] !== undefined
-                                  ? tempGrcp[segData.id]
-                                  : (segData.identificacaoGrcp || "")
-                              }
-                              placeholder="Identificação..."
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setTempGrcp((prev) => ({
-                                  ...prev,
-                                  [segData.id]: val,
-                                }));
-                                handleInlineUpdate(
-                                  segData.id,
-                                  "identificacaoGrcp",
-                                  val,
-                                  600,
-                                );
-                              }}
-                              onBlur={(e) => {
-                                const val = e.target.value;
-                                flushInlineUpdate(
-                                  segData.id,
-                                  "identificacaoGrcp",
-                                  val,
-                                );
-                                setTempGrcp((prev) => {
-                                  const next = { ...prev };
-                                  delete next[segData.id];
-                                  return next;
-                                });
-                              }}
-                            />
-                          ) : (
-                            <span className="text-gray-200 text-[8px]">
-                              ---
-                            </span>
+                            <span className="text-gray-200 text-[8px]">---</span>
                           )}
-                        </div>
-                      </td>
-                      <td className="p-2 px-4 min-w-[100px]">
-                        {segData ? (
-                          <div className="flex items-center gap-0.5">
-                            <span className="font-black text-gray-900 text-[10px]">
-                              R$
-                            </span>
-                            <input
-                              type="text"
-                              disabled={role !== "master" && role !== "admin"}
-                              className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
-                              value={
-                                tempValues[segData.id] !== undefined
-                                  ? tempValues[segData.id]
-                                  : formatBRL(segData.valor)
-                              }
-                              onFocus={() => {
-                                setTempValues((prev) => ({
-                                  ...prev,
-                                  [segData.id]: formatBRL(segData.valor),
-                                }));
-                              }}
-                              onChange={(e) => {
-                                const typed = e.target.value;
-                                setTempValues((prev) => ({
-                                  ...prev,
-                                  [segData.id]: typed,
-                                }));
-                                const numVal = parseBRLToFloat(typed);
-                                handleInlineUpdate(
-                                  segData.id,
-                                  "valor",
-                                  numVal,
-                                  600,
-                                );
-                              }}
-                              onBlur={(e) => {
-                                const typed =
+                        </td>
+                        <td className="p-2 text-center">
+                          {patData?.urlGuia ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => openDocument(patData.urlGuia, patData.id, true, patData.onedriveGuiaId)}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                                  patData.urlGuia?.includes("firebasestorage")
+                                    ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                                    : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                }`}
+                                title={
+                                  patData.urlGuia?.includes("firebasestorage")
+                                    ? "Visualizar Guia Local"
+                                    : "Visualizar Guia no OneDrive"
+                                }
+                              >
+                                {patData.urlGuia?.includes("firebasestorage") ? (
+                                  <FileText className="w-4 h-4" />
+                                ) : (
+                                  <Cloud className="w-4 h-4 text-indigo-500" />
+                                )}
+                              </button>
+                              {(role === "master" || role === "admin") && (
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteGuia(patData.id)}
+                                    className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Deletar Lançamento"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(patData, dept.nome, "guia")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            (role === "master" || role === "admin") ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() =>
+                                    triggerUpload(dept.id, "patronal", "guia")
+                                  }
+                                  className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
+                                  title="Upload Manual"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                {dept.onedriveFolderId && (
+                                  <button
+                                    onClick={() =>
+                                      setOneDrivePickContext({
+                                        deptId: dept.id,
+                                        deptNome: dept.nome,
+                                        tipo: "patronal",
+                                        target: "guia",
+                                      })
+                                    }
+                                    className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                    title="Vincular do OneDrive"
+                                  >
+                                    <Cloud size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                            )
+                          )}
+                        </td>
+                        <td className="p-2 text-center">
+                          {patData?.urlComprovante ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => openDocument(patData.urlComprovante, patData.id, false, patData.onedriveComprovanteId)}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
+                                  patData.urlComprovante?.includes("firebasestorage")
+                                    ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100"
+                                    : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                }`}
+                                title={
+                                  patData.urlComprovante?.includes("firebasestorage")
+                                    ? "Visualizar Comprovante Local"
+                                    : "Visualizar Comprovante no OneDrive"
+                                }
+                              >
+                                {patData.urlComprovante?.includes("firebasestorage") ? (
+                                  <CheckCircle className="w-4.5 h-4.5" />
+                                ) : (
+                                  <Cloud className="w-4 h-4 text-indigo-500" />
+                                )}
+                              </button>
+                              {(role === "master" || role === "admin") && (
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      askConfirmation(
+                                        "Remover Comprovante",
+                                        "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                        "danger",
+                                        async () => {
+                                          try {
+                                            await updateDoc(
+                                              doc(db, "guias", patData.id),
+                                              {
+                                                urlComprovante: null,
+                                                onedriveComprovanteId: null,
+                                                status: "pendente",
+                                              },
+                                            );
+                                            setGuias((prev) =>
+                                              prev.map((g) =>
+                                                g.id === patData.id
+                                                  ? {
+                                                      ...g,
+                                                      urlComprovante: undefined,
+                                                      onedriveComprovanteId: undefined,
+                                                      status: "pendente",
+                                                    }
+                                                  : g,
+                                              ),
+                                            );
+                                            showAlert(
+                                              "Desvinculado",
+                                              "Arquivo do comprovante de pagamento desassociado.",
+                                              "success",
+                                            );
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        },
+                                      );
+                                    }}
+                                    className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Desvincular Comprovante"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(patData, dept.nome, "comprovante")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            (role === "master" || role === "admin") ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() =>
+                                    triggerUpload(dept.id, "patronal", "comprovante")
+                                  }
+                                  className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
+                                  title="Upload Comprovante"
+                                >
+                                  <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
+                                </button>
+                                {dept.onedriveFolderId && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOneDrivePickContext({
+                                        deptId: dept.id,
+                                        deptNome: dept.nome,
+                                        tipo: "patronal",
+                                        target: "comprovante",
+                                      })
+                                    }
+                                    className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                    title="Vincular Comprovante do OneDrive"
+                                  >
+                                    <Cloud size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300 text-[10px]">—</span>
+                            )
+                          )}
+                        </td>
+                        <td className="p-2 text-center border-r border-gray-200">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setObsModalConfig({
+                                isOpen: true,
+                                guiaId: patData?.id || null,
+                                deptId: dept.id,
+                                departamentoNome: dept.nome,
+                                tipo: "patronal",
+                                text: patData?.observacao || "",
+                              })
+                            }
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                              patData?.observacao
+                                ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                                : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                            }`}
+                            title={patData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                        </td>
+
+                        {/* SEGURADOS SECTION */}
+                        <td className="p-2 px-4 min-w-[140px]">
+                          <div className="min-h-[1.5rem] flex items-center">
+                            {segData ? (
+                              <input
+                                type="text"
+                                disabled={role !== "master" && role !== "admin"}
+                                className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
+                                value={
+                                  tempGrcp[segData.id] !== undefined
+                                    ? tempGrcp[segData.id]
+                                    : (segData.identificacaoGrcp || "")
+                                }
+                                placeholder="Identificação..."
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setTempGrcp((prev) => ({
+                                    ...prev,
+                                    [segData.id]: val,
+                                  }));
+                                  handleInlineUpdate(
+                                    segData.id,
+                                    "identificacaoGrcp",
+                                    val,
+                                    600,
+                                  );
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value;
+                                  flushInlineUpdate(
+                                    segData.id,
+                                    "identificacaoGrcp",
+                                    val,
+                                  );
+                                  setTempGrcp((prev) => {
+                                    const next = { ...prev };
+                                    delete next[segData.id];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <span className="text-gray-200 text-[8px]">
+                                ---
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-2 px-4 min-w-[100px]">
+                          {segData ? (
+                            <div className="flex items-center gap-0.5">
+                              <span className="font-black text-gray-900 text-[10px]">
+                                R$
+                              </span>
+                              <input
+                                type="text"
+                                disabled={role !== "master" && role !== "admin"}
+                                className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
+                                value={
                                   tempValues[segData.id] !== undefined
                                     ? tempValues[segData.id]
-                                    : e.target.value;
-                                const numVal = parseBRLToFloat(typed);
-                                flushInlineUpdate(segData.id, "valor", numVal);
-                                setTempValues((prev) => {
-                                  const next = { ...prev };
-                                  delete next[segData.id];
-                                  return next;
-                                });
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <span className="text-gray-200 text-[8px]">---</span>
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        {segData?.urlGuia ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openDocument(segData.urlGuia, segData.id, true, segData.onedriveGuiaId)}
-                              className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-all border border-blue-200"
-                              title="Visualizar"
-                            >
-                              <FileText className="w-4 h-4" />
-                            </button>
-                            {(role === "master" || role === "admin") && (
-                              <div className="flex flex-col items-center justify-center gap-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteGuia(segData.id)}
-                                  className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
-                                  title="Deletar Lançamento"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditModal(segData, dept.nome, "guia")}
-                                  className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
-                                  title="Editar Descrição / Valor"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          (role === "master" || role === "admin") ? (
+                                    : formatBRL(segData.valor)
+                                }
+                                onFocus={() => {
+                                  setTempValues((prev) => ({
+                                    ...prev,
+                                    [segData.id]: formatBRL(segData.valor),
+                                  }));
+                                }}
+                                onChange={(e) => {
+                                  const typed = e.target.value;
+                                  setTempValues((prev) => ({
+                                    ...prev,
+                                    [segData.id]: typed,
+                                  }));
+                                  const numVal = parseBRLToFloat(typed);
+                                  handleInlineUpdate(
+                                    segData.id,
+                                    "valor",
+                                    numVal,
+                                    600,
+                                  );
+                                }}
+                                onBlur={(e) => {
+                                  const typed =
+                                    tempValues[segData.id] !== undefined
+                                      ? tempValues[segData.id]
+                                      : e.target.value;
+                                  const numVal = parseBRLToFloat(typed);
+                                  flushInlineUpdate(segData.id, "valor", numVal);
+                                  setTempValues((prev) => {
+                                    const next = { ...prev };
+                                    delete next[segData.id];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-gray-200 text-[8px]">---</span>
+                          )}
+                        </td>
+                        <td className="p-2 text-center">
+                          {segData?.urlGuia ? (
                             <div className="flex items-center justify-center gap-1">
                               <button
-                                onClick={() =>
-                                  triggerUpload(dept.id, "segurado", "guia")
+                                onClick={() => openDocument(segData.urlGuia, segData.id, true, segData.onedriveGuiaId)}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                                  segData.urlGuia?.includes("firebasestorage")
+                                    ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                                    : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                }`}
+                                title={
+                                  segData.urlGuia?.includes("firebasestorage")
+                                    ? "Visualizar Guia Local"
+                                    : "Visualizar Guia no OneDrive"
                                 }
-                                className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
-                                title="Upload Manual"
                               >
-                                <Plus className="w-3.5 h-3.5" />
+                                {segData.urlGuia?.includes("firebasestorage") ? (
+                                  <FileText className="w-4 h-4" />
+                                ) : (
+                                  <Cloud className="w-4 h-4 text-indigo-500" />
+                                )}
                               </button>
-                              {dept.onedriveFolderId && (
-                                <button
-                                  onClick={() =>
-                                    setOneDrivePickContext({
-                                      deptId: dept.id,
-                                      tipo: "segurado",
-                                      target: "guia",
-                                    })
-                                  }
-                                  className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                  title="Vincular do OneDrive"
-                                >
-                                  <Cloud size={14} />
-                                </button>
+                              {(role === "master" || role === "admin") && (
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteGuia(segData.id)}
+                                    className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Deletar Lançamento"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(segData, dept.nome, "guia")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
-                            <span className="text-[10px] text-gray-400 select-none">Pendente</span>
-                          )
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        {segData?.urlComprovante ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openDocument(segData.urlComprovante, segData.id, false, segData.onedriveComprovanteId)}
-                              className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-100 transition-all border border-emerald-200 shadow-sm"
-                              title="Visualizar Comprovante"
-                            >
-                              <CheckCircle className="w-4.5 h-4.5" />
-                            </button>
-                            {(role === "master" || role === "admin") && (
+                            (role === "master" || role === "admin") ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() =>
+                                    triggerUpload(dept.id, "segurado", "guia")
+                                  }
+                                  className="w-8 h-8 bg-gray-50 text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-gray-200"
+                                  title="Upload Manual"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                {dept.onedriveFolderId && (
+                                  <button
+                                    onClick={() =>
+                                      setOneDrivePickContext({
+                                        deptId: dept.id,
+                                        deptNome: dept.nome,
+                                        tipo: "segurado",
+                                        target: "guia",
+                                      })
+                                    }
+                                    className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                    title="Vincular do OneDrive"
+                                  >
+                                    <Cloud size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                            )
+                          )}
+                        </td>
+                        <td className="p-2 text-center">
+                          {segData?.urlComprovante ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => openDocument(segData.urlComprovante, segData.id, false, segData.onedriveComprovanteId)}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm ${
+                                  segData.urlComprovante?.includes("firebasestorage")
+                                    ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100"
+                                    : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                }`}
+                                title={
+                                  segData.urlComprovante?.includes("firebasestorage")
+                                    ? "Visualizar Comprovante Local"
+                                    : "Visualizar Comprovante no OneDrive"
+                                }
+                              >
+                                {segData.urlComprovante?.includes("firebasestorage") ? (
+                                  <CheckCircle className="w-4.5 h-4.5" />
+                                ) : (
+                                  <Cloud className="w-4 h-4 text-indigo-500" />
+                                )}
+                              </button>
+                              {(role === "master" || role === "admin") && (
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      askConfirmation(
+                                        "Remover Comprovante",
+                                        "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                        "danger",
+                                        async () => {
+                                          try {
+                                            await updateDoc(
+                                              doc(db, "guias", segData.id),
+                                              {
+                                                urlComprovante: null,
+                                                onedriveComprovanteId: null,
+                                                status: "pendente",
+                                              },
+                                            );
+                                            setGuias((prev) =>
+                                              prev.map((g) =>
+                                                g.id === segData.id
+                                                  ? {
+                                                      ...g,
+                                                      urlComprovante: undefined,
+                                                      onedriveComprovanteId: undefined,
+                                                      status: "pendente",
+                                                    }
+                                                  : g,
+                                              ),
+                                            );
+                                            showAlert(
+                                              "Desvinculado",
+                                              "Arquivo do comprovante de pagamento desassociado.",
+                                              "success",
+                                            );
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        },
+                                      );
+                                    }}
+                                    className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                    title="Desvincular Comprovante"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(segData, dept.nome, "comprovante")}
+                                    className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                    title="Editar Descrição / Valor"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            (role === "master" || role === "admin") ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() =>
+                                    triggerUpload(dept.id, "segurado", "comprovante")
+                                  }
+                                  className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
+                                  title="Upload Comprovante"
+                                >
+                                  <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
+                                </button>
+                                {dept.onedriveFolderId && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOneDrivePickContext({
+                                        deptId: dept.id,
+                                        deptNome: dept.nome,
+                                        tipo: "segurado",
+                                        target: "comprovante",
+                                      })
+                                    }
+                                    className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                    title="Vincular Comprovante do OneDrive"
+                                  >
+                                    <Cloud size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300 text-[10px]">—</span>
+                            )
+                          )}
+                        </td>
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setObsModalConfig({
+                                isOpen: true,
+                                guiaId: segData?.id || null,
+                                deptId: dept.id,
+                                departamentoNome: dept.nome,
+                                tipo: "segurado",
+                                text: segData?.observacao || "",
+                              })
+                            }
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                              segData?.observacao
+                                ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                                : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                            }`}
+                            title={segData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* LINHAS DE FOLHA COMPLEMENTAR */}
+                      {compGroups.map((comp) => {
+                        const compPatData = getGuiaData(dept.id, "patronal", comp.id);
+                        const compSegData = getGuiaData(dept.id, "segurado", comp.id);
+
+                        return (
+                          <tr
+                            key={`${dept.id}-${comp.id}`}
+                            className="bg-indigo-50/20 hover:bg-indigo-50/40 transition-colors border-l-4 border-l-indigo-500"
+                          >
+                            <td className="py-2.5 pl-6 pr-4 border-r border-gray-200 max-w-[240px]">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-indigo-500 font-bold text-xs select-none">↳</span>
+                                  <span className="inline-block px-1.5 py-0.5 bg-indigo-100 text-indigo-800 rounded font-black text-[9px] uppercase tracking-wider truncate">
+                                    {comp.descricao}
+                                  </span>
+                                </div>
+                                {(role === "master" || role === "admin") && (
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditComplementarDescricao(dept.id, comp)}
+                                      className="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"
+                                      title="Editar Descrição / Valores da Folha Complementar"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteComplementar(dept.id, comp.id)}
+                                      className="text-gray-300 hover:text-rose-600 p-1 rounded transition-colors"
+                                      title="Excluir Folha Complementar"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* PATRONAL SECTION (COMPLEMENTAR) */}
+                            <td className="p-2 px-4 min-w-[140px]">
+                              <div className="min-h-[1.5rem] flex items-center">
+                                <input
+                                  type="text"
+                                  disabled={role !== "master" && role !== "admin"}
+                                  className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
+                                  value={
+                                    compPatData && tempGrcp[compPatData.id] !== undefined
+                                      ? tempGrcp[compPatData.id]
+                                      : (compPatData?.identificacaoGrcp || "")
+                                  }
+                                  placeholder={role === "master" || role === "admin" ? "Identificação..." : "---"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (compPatData) {
+                                      setTempGrcp((prev) => ({
+                                        ...prev,
+                                        [compPatData.id]: val,
+                                      }));
+                                      handleInlineUpdate(
+                                        compPatData.id,
+                                        "identificacaoGrcp",
+                                        val,
+                                        600,
+                                      );
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const val = e.target.value;
+                                    if (compPatData) {
+                                      flushInlineUpdate(
+                                        compPatData.id,
+                                        "identificacaoGrcp",
+                                        val,
+                                      );
+                                      setTempGrcp((prev) => {
+                                        const next = { ...prev };
+                                        delete next[compPatData.id];
+                                        return next;
+                                      });
+                                    } else if (val.trim()) {
+                                      handleInlineOrCreate(
+                                        dept.id,
+                                        "patronal",
+                                        compPatData,
+                                        "identificacaoGrcp",
+                                        val,
+                                        comp.id,
+                                        comp.descricao,
+                                      );
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 px-4 min-w-[100px]">
+                              <div className="flex items-center gap-0.5">
+                                <span className="font-black text-gray-900 text-[10px]">
+                                  R$
+                                </span>
+                                <input
+                                  type="text"
+                                  disabled={role !== "master" && role !== "admin"}
+                                  className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
+                                  value={
+                                    compPatData && tempValues[compPatData.id] !== undefined
+                                      ? tempValues[compPatData.id]
+                                      : compPatData
+                                        ? formatBRL(compPatData.valor)
+                                        : ""
+                                  }
+                                  placeholder="0,00"
+                                  onFocus={() => {
+                                    if (compPatData) {
+                                      setTempValues((prev) => ({
+                                        ...prev,
+                                        [compPatData.id]: formatBRL(compPatData.valor),
+                                      }));
+                                    }
+                                  }}
+                                  onChange={(e) => {
+                                    const typed = e.target.value;
+                                    if (compPatData) {
+                                      setTempValues((prev) => ({
+                                        ...prev,
+                                        [compPatData.id]: typed,
+                                      }));
+                                      const numVal = parseBRLToFloat(typed);
+                                      handleInlineUpdate(
+                                        compPatData.id,
+                                        "valor",
+                                        numVal,
+                                        600,
+                                      );
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const typed =
+                                      compPatData && tempValues[compPatData.id] !== undefined
+                                        ? tempValues[compPatData.id]
+                                        : e.target.value;
+                                    const numVal = parseBRLToFloat(typed);
+                                    if (compPatData) {
+                                      flushInlineUpdate(compPatData.id, "valor", numVal);
+                                      setTempValues((prev) => {
+                                        const next = { ...prev };
+                                        delete next[compPatData.id];
+                                        return next;
+                                      });
+                                    } else if (numVal > 0) {
+                                      handleInlineOrCreate(
+                                        dept.id,
+                                        "patronal",
+                                        compPatData,
+                                        "valor",
+                                        numVal,
+                                        comp.id,
+                                        comp.descricao,
+                                      );
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 text-center">
+                              {compPatData?.urlGuia ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => openDocument(compPatData.urlGuia, compPatData.id, true, compPatData.onedriveGuiaId)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                                      compPatData.urlGuia?.includes("firebasestorage")
+                                        ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                                        : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                    }`}
+                                    title={
+                                      compPatData.urlGuia?.includes("firebasestorage")
+                                        ? "Visualizar Guia Local"
+                                        : "Visualizar Guia no OneDrive"
+                                    }
+                                  >
+                                    {compPatData.urlGuia?.includes("firebasestorage") ? (
+                                      <FileText className="w-4 h-4" />
+                                    ) : (
+                                      <Cloud className="w-4 h-4 text-indigo-500" />
+                                    )}
+                                  </button>
+                                  {(role === "master" || role === "admin") && (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteGuia(compPatData.id)}
+                                        className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Deletar Lançamento"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compPatData, `${dept.nome} (${comp.descricao})`, "guia")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                (role === "master" || role === "admin") ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() =>
+                                        triggerUpload(dept.id, "patronal", "guia", comp.id, comp.descricao)
+                                      }
+                                      className="w-8 h-8 bg-white text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-rose-200 shadow-2xs"
+                                      title="Upload Guia Complementar"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                    {dept.onedriveFolderId && (
+                                      <button
+                                        onClick={() =>
+                                          setOneDrivePickContext({
+                                            deptId: dept.id,
+                                            deptNome: `${dept.nome} (${comp.descricao})`,
+                                            tipo: "patronal",
+                                            target: "guia",
+                                            complementarId: comp.id,
+                                            descricaoFolha: comp.descricao,
+                                          })
+                                        }
+                                        className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                        title="Vincular Guia Complementar do OneDrive"
+                                      >
+                                        <Cloud size={14} />
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                                )
+                              )}
+                            </td>
+                            <td className="p-2 text-center">
+                              {compPatData?.urlComprovante ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => openDocument(compPatData.urlComprovante, compPatData.id, false, compPatData.onedriveComprovanteId)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-xs ${
+                                      compPatData.urlComprovante?.includes("firebasestorage")
+                                        ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100"
+                                        : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                    }`}
+                                    title={
+                                      compPatData.urlComprovante?.includes("firebasestorage")
+                                        ? "Visualizar Comprovante Local"
+                                        : "Visualizar Comprovante no OneDrive"
+                                    }
+                                  >
+                                    {compPatData.urlComprovante?.includes("firebasestorage") ? (
+                                      <CheckCircle className="w-4.5 h-4.5" />
+                                    ) : (
+                                      <Cloud className="w-4 h-4 text-indigo-500" />
+                                    )}
+                                  </button>
+                                  {(role === "master" || role === "admin") && (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          askConfirmation(
+                                            "Remover Comprovante",
+                                            "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                            "danger",
+                                            async () => {
+                                              try {
+                                                await updateDoc(
+                                                  doc(db, "guias", compPatData.id),
+                                                  {
+                                                    urlComprovante: null,
+                                                    onedriveComprovanteId: null,
+                                                    status: "pendente",
+                                                  },
+                                                );
+                                                setGuias((prev) =>
+                                                  prev.map((g) =>
+                                                    g.id === compPatData.id
+                                                      ? {
+                                                          ...g,
+                                                          urlComprovante: undefined,
+                                                          onedriveComprovanteId: undefined,
+                                                          status: "pendente",
+                                                        }
+                                                      : g,
+                                                  ),
+                                                );
+                                                showAlert(
+                                                  "Desvinculado",
+                                                  "Arquivo do comprovante de pagamento desassociado.",
+                                                  "success",
+                                                );
+                                              } catch (err) {
+                                                console.error(err);
+                                              }
+                                            },
+                                          );
+                                        }}
+                                        className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Desvincular Comprovante"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compPatData, `${dept.nome} (${comp.descricao})`, "comprovante")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                (role === "master" || role === "admin") ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() =>
+                                        triggerUpload(dept.id, "patronal", "comprovante", comp.id, comp.descricao)
+                                      }
+                                      className="w-7 h-7 bg-white hover:bg-gray-100 border border-dashed border-rose-200 rounded-lg flex items-center justify-center"
+                                      title="Upload Comprovante Complementar"
+                                    >
+                                      <Upload className="w-3.5 h-3.5 text-rose-400 hover:text-gray-650" />
+                                    </button>
+                                    {dept.onedriveFolderId && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOneDrivePickContext({
+                                            deptId: dept.id,
+                                            deptNome: `${dept.nome} (${comp.descricao})`,
+                                            tipo: "patronal",
+                                            target: "comprovante",
+                                            complementarId: comp.id,
+                                            descricaoFolha: comp.descricao,
+                                          })
+                                        }
+                                        className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                        title="Vincular Comprovante Complementar do OneDrive"
+                                      >
+                                        <Cloud size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 select-none">—</span>
+                                )
+                              )}
+                            </td>
+                            <td className="p-2 text-center border-r border-gray-200">
                               <button
                                 type="button"
-                                onClick={() => handleOpenEditModal(segData, dept.nome, "comprovante")}
-                                className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
-                                title="Editar Descrição / Valor"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          (role === "master" || role === "admin") ? (
-                            <div className="flex items-center justify-center gap-1">
-                              <button
                                 onClick={() =>
-                                  triggerUpload(dept.id, "segurado", "comprovante")
+                                  setObsModalConfig({
+                                    isOpen: true,
+                                    guiaId: compPatData?.id || null,
+                                    deptId: dept.id,
+                                    departamentoNome: `${dept.nome} (${comp.descricao})`,
+                                    tipo: "patronal",
+                                    text: compPatData?.observacao || "",
+                                    complementarId: comp.id,
+                                    descricaoFolha: comp.descricao,
+                                  })
                                 }
-                                className="w-7 h-7 bg-transparent hover:bg-gray-100 border border-dashed border-gray-200 rounded-lg flex items-center justify-center"
-                                title="Upload Comprovante"
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                                  compPatData?.observacao
+                                    ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                                    : "bg-white text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                                }`}
+                                title={compPatData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
                               >
-                                <Upload className="w-3.5 h-3.5 text-gray-300 hover:text-gray-650" />
+                                <MessageSquare className="w-4 h-4" />
                               </button>
-                              {dept.onedriveFolderId && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setOneDrivePickContext({
-                                      deptId: dept.id,
-                                      tipo: "segurado",
-                                      target: "comprovante",
-                                    })
+                            </td>
+
+                            {/* SEGURADOS SECTION (COMPLEMENTAR) */}
+                            <td className="p-2 px-4 min-w-[140px]">
+                              <div className="min-h-[1.5rem] flex items-center">
+                                <input
+                                  type="text"
+                                  disabled={role !== "master" && role !== "admin"}
+                                  className="bg-transparent border-none p-0 text-[10px] font-bold text-gray-600 w-full focus:ring-0 outline-none leading-tight disabled:opacity-75"
+                                  value={
+                                    compSegData && tempGrcp[compSegData.id] !== undefined
+                                      ? tempGrcp[compSegData.id]
+                                      : (compSegData?.identificacaoGrcp || "")
                                   }
-                                  className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
-                                  title="Vincular Comprovante do OneDrive"
-                                >
-                                  <Cloud size={12} />
-                                </button>
+                                  placeholder={role === "master" || role === "admin" ? "Identificação..." : "---"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (compSegData) {
+                                      setTempGrcp((prev) => ({
+                                        ...prev,
+                                        [compSegData.id]: val,
+                                      }));
+                                      handleInlineUpdate(
+                                        compSegData.id,
+                                        "identificacaoGrcp",
+                                        val,
+                                        600,
+                                      );
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const val = e.target.value;
+                                    if (compSegData) {
+                                      flushInlineUpdate(
+                                        compSegData.id,
+                                        "identificacaoGrcp",
+                                        val,
+                                      );
+                                      setTempGrcp((prev) => {
+                                        const next = { ...prev };
+                                        delete next[compSegData.id];
+                                        return next;
+                                      });
+                                    } else if (val.trim()) {
+                                      handleInlineOrCreate(
+                                        dept.id,
+                                        "segurado",
+                                        compSegData,
+                                        "identificacaoGrcp",
+                                        val,
+                                        comp.id,
+                                        comp.descricao,
+                                      );
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 px-4 min-w-[100px]">
+                              <div className="flex items-center gap-0.5">
+                                <span className="font-black text-gray-900 text-[10px]">
+                                  R$
+                                </span>
+                                <input
+                                  type="text"
+                                  disabled={role !== "master" && role !== "admin"}
+                                  className="bg-transparent border-none p-0 font-black text-gray-900 w-full focus:ring-0 text-[10px] disabled:opacity-75"
+                                  value={
+                                    compSegData && tempValues[compSegData.id] !== undefined
+                                      ? tempValues[compSegData.id]
+                                      : compSegData
+                                        ? formatBRL(compSegData.valor)
+                                        : ""
+                                  }
+                                  placeholder="0,00"
+                                  onFocus={() => {
+                                    if (compSegData) {
+                                      setTempValues((prev) => ({
+                                        ...prev,
+                                        [compSegData.id]: formatBRL(compSegData.valor),
+                                      }));
+                                    }
+                                  }}
+                                  onChange={(e) => {
+                                    const typed = e.target.value;
+                                    if (compSegData) {
+                                      setTempValues((prev) => ({
+                                        ...prev,
+                                        [compSegData.id]: typed,
+                                      }));
+                                      const numVal = parseBRLToFloat(typed);
+                                      handleInlineUpdate(
+                                        compSegData.id,
+                                        "valor",
+                                        numVal,
+                                        600,
+                                      );
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const typed =
+                                      compSegData && tempValues[compSegData.id] !== undefined
+                                        ? tempValues[compSegData.id]
+                                        : e.target.value;
+                                    const numVal = parseBRLToFloat(typed);
+                                    if (compSegData) {
+                                      flushInlineUpdate(compSegData.id, "valor", numVal);
+                                      setTempValues((prev) => {
+                                        const next = { ...prev };
+                                        delete next[compSegData.id];
+                                        return next;
+                                      });
+                                    } else if (numVal > 0) {
+                                      handleInlineOrCreate(
+                                        dept.id,
+                                        "segurado",
+                                        compSegData,
+                                        "valor",
+                                        numVal,
+                                        comp.id,
+                                        comp.descricao,
+                                      );
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 text-center">
+                              {compSegData?.urlGuia ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => openDocument(compSegData.urlGuia, compSegData.id, true, compSegData.onedriveGuiaId)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                                      compSegData.urlGuia?.includes("firebasestorage")
+                                        ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                                        : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                    }`}
+                                    title={
+                                      compSegData.urlGuia?.includes("firebasestorage")
+                                        ? "Visualizar Guia Local"
+                                        : "Visualizar Guia no OneDrive"
+                                    }
+                                  >
+                                    {compSegData.urlGuia?.includes("firebasestorage") ? (
+                                      <FileText className="w-4 h-4" />
+                                    ) : (
+                                      <Cloud className="w-4 h-4 text-indigo-500" />
+                                    )}
+                                  </button>
+                                  {(role === "master" || role === "admin") && (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteGuia(compSegData.id)}
+                                        className="w-4 h-4 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Deletar Lançamento"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compSegData, `${dept.nome} (${comp.descricao})`, "guia")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                (role === "master" || role === "admin") ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() =>
+                                        triggerUpload(dept.id, "segurado", "guia", comp.id, comp.descricao)
+                                      }
+                                      className="w-8 h-8 bg-white text-rose-400 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all border border-dashed border-rose-200 shadow-2xs"
+                                      title="Upload Guia Complementar"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                    {dept.onedriveFolderId && (
+                                      <button
+                                        onClick={() =>
+                                          setOneDrivePickContext({
+                                            deptId: dept.id,
+                                            deptNome: `${dept.nome} (${comp.descricao})`,
+                                            tipo: "segurado",
+                                            target: "guia",
+                                            complementarId: comp.id,
+                                            descricaoFolha: comp.descricao,
+                                          })
+                                        }
+                                        className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                        title="Vincular Guia Complementar do OneDrive"
+                                      >
+                                        <Cloud size={14} />
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 select-none">Pendente</span>
+                                )
                               )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300 text-[10px]">—</span>
-                          )
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setObsModalConfig({
-                              isOpen: true,
-                              guiaId: segData?.id || null,
-                              deptId: dept.id,
-                              departamentoNome: dept.nome,
-                              tipo: "segurado",
-                              text: segData?.observacao || "",
-                            })
-                          }
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                            segData?.observacao
-                              ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
-                              : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
-                          }`}
-                          title={segData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
+                            </td>
+                            <td className="p-2 text-center">
+                              {compSegData?.urlComprovante ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => openDocument(compSegData.urlComprovante, compSegData.id, false, compSegData.onedriveComprovanteId)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-xs ${
+                                      compSegData.urlComprovante?.includes("firebasestorage")
+                                        ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100"
+                                        : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                    }`}
+                                    title={
+                                      compSegData.urlComprovante?.includes("firebasestorage")
+                                        ? "Visualizar Comprovante Local"
+                                        : "Visualizar Comprovante no OneDrive"
+                                    }
+                                  >
+                                    {compSegData.urlComprovante?.includes("firebasestorage") ? (
+                                      <CheckCircle className="w-4.5 h-4.5" />
+                                    ) : (
+                                      <Cloud className="w-4 h-4 text-indigo-500" />
+                                    )}
+                                  </button>
+                                  {(role === "master" || role === "admin") && (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          askConfirmation(
+                                            "Remover Comprovante",
+                                            "Deseja realmente remover o comprovante de pagamento deste registro?",
+                                            "danger",
+                                            async () => {
+                                              try {
+                                                await updateDoc(
+                                                  doc(db, "guias", compSegData.id),
+                                                  {
+                                                    urlComprovante: null,
+                                                    onedriveComprovanteId: null,
+                                                    status: "pendente",
+                                                  },
+                                                );
+                                                setGuias((prev) =>
+                                                  prev.map((g) =>
+                                                    g.id === compSegData.id
+                                                      ? {
+                                                          ...g,
+                                                          urlComprovante: undefined,
+                                                          onedriveComprovanteId: undefined,
+                                                          status: "pendente",
+                                                        }
+                                                      : g,
+                                                  ),
+                                                );
+                                                showAlert(
+                                                  "Desvinculado",
+                                                  "Arquivo do comprovante de pagamento desassociado.",
+                                                  "success",
+                                                );
+                                              } catch (err) {
+                                                console.error(err);
+                                              }
+                                            },
+                                          );
+                                        }}
+                                        className="w-4 h-4 text-gray-300 hover:text-rose-600 transition-colors flex items-center justify-center"
+                                        title="Desvincular Comprovante"
+                                      >
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(compSegData, `${dept.nome} (${comp.descricao})`, "comprovante")}
+                                        className="w-4 h-4 text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center"
+                                        title="Editar Descrição / Valor"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                (role === "master" || role === "admin") ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() =>
+                                        triggerUpload(dept.id, "segurado", "comprovante", comp.id, comp.descricao)
+                                      }
+                                      className="w-7 h-7 bg-white hover:bg-gray-100 border border-dashed border-rose-200 rounded-lg flex items-center justify-center"
+                                      title="Upload Comprovante Complementar"
+                                    >
+                                      <Upload className="w-3.5 h-3.5 text-rose-400 hover:text-gray-650" />
+                                    </button>
+                                    {dept.onedriveFolderId && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOneDrivePickContext({
+                                            deptId: dept.id,
+                                            deptNome: `${dept.nome} (${comp.descricao})`,
+                                            tipo: "segurado",
+                                            target: "comprovante",
+                                            complementarId: comp.id,
+                                            descricaoFolha: comp.descricao,
+                                          })
+                                        }
+                                        className="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all border border-emerald-200"
+                                        title="Vincular Comprovante Complementar do OneDrive"
+                                      >
+                                        <Cloud size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 select-none">—</span>
+                                )
+                              )}
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setObsModalConfig({
+                                    isOpen: true,
+                                    guiaId: compSegData?.id || null,
+                                    deptId: dept.id,
+                                    departamentoNome: `${dept.nome} (${comp.descricao})`,
+                                    tipo: "segurado",
+                                    text: compSegData?.observacao || "",
+                                    complementarId: comp.id,
+                                    descricaoFolha: comp.descricao,
+                                  })
+                                }
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border mx-auto ${
+                                  compSegData?.observacao
+                                    ? "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                                    : "bg-white text-gray-400 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200"
+                                }`}
+                                title={compSegData?.observacao ? "Ver/Editar Observação (Preenchida)" : "Adicionar Observação"}
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1492,6 +2640,49 @@ export default function GuiaList({
           </table>
         </div>
       </div>
+
+      <footer className="mt-10 max-w-[1600px] mx-auto px-12 flex flex-col md:flex-row justify-between items-center gap-6 pb-20">
+        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-[0.2em]">
+          Total de {departamentos.length} departamentos monitorados
+        </p>
+        <div className="flex items-center gap-6 bg-white px-8 py-4 rounded-3xl border border-gray-100 shadow-sm">
+          <div className="text-center md:text-left">
+            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+              Total Patronal
+            </p>
+            <p className="text-xl font-black text-blue-600">
+              R${" "}
+              {guias
+                .filter(
+                  (g) =>
+                    g.tipo === "patronal" &&
+                    (g.regime || "capitalizado") === activeRegime &&
+                    departamentos.some((d) => d.id === g.departamentoId),
+                )
+                .reduce((acc, g) => acc + (g.valor || 0), 0)
+                .toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div className="w-px h-8 bg-gray-100" />
+          <div className="text-center md:text-left">
+            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+              Total Segurados
+            </p>
+            <p className="text-xl font-black text-emerald-600">
+              R${" "}
+              {guias
+                .filter(
+                  (g) =>
+                    g.tipo === "segurado" &&
+                    (g.regime || "capitalizado") === activeRegime &&
+                    departamentos.some((d) => d.id === g.departamentoId),
+                )
+                .reduce((acc, g) => acc + (g.valor || 0), 0)
+                .toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </footer>
 
       {/* Hidden File Input */}
       <input
@@ -1582,6 +2773,8 @@ export default function GuiaList({
                         obsModalConfig.deptId,
                         obsModalConfig.tipo,
                         obsModalConfig.text,
+                        obsModalConfig.complementarId,
+                        obsModalConfig.descricaoFolha,
                       )
                     }
                     className="px-6 py-3.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
@@ -1612,7 +2805,7 @@ export default function GuiaList({
                     Vincular do OneDrive
                   </h3>
                   <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-2">
-                    Escolha o arquivo PDF para vincular
+                    {oneDrivePickContext.deptNome ? `${oneDrivePickContext.deptNome} • ` : ""}Escolha o arquivo PDF para vincular
                   </p>
                 </div>
                 <button
@@ -1635,14 +2828,10 @@ export default function GuiaList({
                   try {
                     setLoading(true);
                     
-                    const dept = departamentos.find(
-                      (d) => d.id === oneDrivePickContext.deptId,
-                    );
-                    const existingGuia = guias.find(
-                      (g) =>
-                        g.departamentoId === oneDrivePickContext.deptId &&
-                        g.tipo === oneDrivePickContext.tipo &&
-                        (g.regime || "capitalizado") === activeRegime,
+                    const existingGuia = getGuiaData(
+                      oneDrivePickContext.deptId,
+                      oneDrivePickContext.tipo,
+                      oneDrivePickContext.complementarId,
                     );
 
                     const urlFieldName =
@@ -1693,6 +2882,13 @@ export default function GuiaList({
                         mes: mesReferencia,
                         ano: anoFiscal,
                         regime: activeRegime,
+                        tipoFolha: oneDrivePickContext.complementarId ? "complementar" : "normal",
+                        complementarId: oneDrivePickContext.complementarId || null,
+                        descricaoFolha:
+                          oneDrivePickContext.descricaoFolha ||
+                          (oneDrivePickContext.complementarId
+                            ? "Folha Complementar"
+                            : "Folha Normal"),
                         nome: file.name.split(".")[0],
                         valor: 0,
                         valorPago: 0,
@@ -1942,6 +3138,65 @@ export default function GuiaList({
                   className="px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
                 >
                   Salvar Alterações
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {/* MODAL DE EDIÇÃO DE DESCRIÇÃO DE FOLHA COMPLEMENTAR (RASCUNHO) */}
+        {editDraftCompModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border border-gray-100"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-xs">
+                  <Pencil className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900 tracking-tight">
+                    Editar Folha Complementar
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium">
+                    Defina o rótulo de identificação desta folha
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                  Descrição da Folha
+                </label>
+                <input
+                  type="text"
+                  value={editDraftCompModal.descricao}
+                  onChange={(e) =>
+                    setEditDraftCompModal((prev) =>
+                      prev ? { ...prev, descricao: e.target.value } : null,
+                    )
+                  }
+                  placeholder="Ex: Folha Complementar 1"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 font-bold focus:bg-white focus:border-indigo-500 focus:outline-hidden transition-all"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setEditDraftCompModal(null)}
+                  className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDraftComplementar}
+                  className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all"
+                >
+                  Salvar Descrição
                 </button>
               </div>
             </motion.div>

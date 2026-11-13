@@ -925,7 +925,7 @@ async function startServer() {
         return res.status(500).json({ error: "GEMINI_API_KEY não configurada no servidor" });
       }
 
-      const { GoogleGenAI, Type, ThinkingLevel } = await import("@google/genai");
+      const { GoogleGenAI, Type } = await import("@google/genai");
       const client = new GoogleGenAI({
         apiKey: geminiApiKey,
         httpOptions: {
@@ -935,13 +935,37 @@ async function startServer() {
         },
       });
 
-      const MODEL_NAME = "gemini-3.5-flash";
+      const callGeminiWithFallback = async (contents: any, schema: any) => {
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
+        let lastError: any = null;
+
+        for (const model of candidateModels) {
+          try {
+            console.log(`[Backend AI] Tentando extração com modelo: ${model}`);
+            const response = await client.models.generateContent({
+              model,
+              contents,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: schema,
+              },
+            });
+            const text = response.text;
+            if (text) {
+              return JSON.parse(text);
+            }
+          } catch (err: any) {
+            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}:`, err?.message || err);
+            lastError = err;
+          }
+        }
+        throw lastError || new Error("Não foi possível extrair os dados do arquivo via IA.");
+      };
 
       if (type === "comprovante") {
         console.log(`[Backend AI] Extracting OneDrive COMPROVANTE: ${filename}`);
-        const response = await client.models.generateContent({
-          model: MODEL_NAME,
-          contents: [
+        const parsed = await callGeminiWithFallback(
+          [
             {
               role: "user",
               parts: [
@@ -966,33 +990,21 @@ async function startServer() {
               ],
             },
           ],
-          config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                valorPago: { type: Type.NUMBER },
-                dataPagamento: { type: Type.STRING },
-                identificacaoGrcp: { type: Type.STRING },
-              },
-              required: ["valorPago"],
+          {
+            type: Type.OBJECT,
+            properties: {
+              valorPago: { type: Type.NUMBER },
+              dataPagamento: { type: Type.STRING },
+              identificacaoGrcp: { type: Type.STRING },
             },
-          },
-        });
-
-        const text = response.text;
-        console.log("[Backend AI] Result (OneDrive Comprovante):", text);
-        if (text) {
-          const parsed = JSON.parse(text);
-          return res.json(parsed);
-        }
-        throw new Error("Resposta da IA vazia");
+            required: ["valorPago"],
+          }
+        );
+        return res.json(parsed);
       } else {
         console.log(`[Backend AI] Extracting OneDrive GUIA: ${filename}`);
-        const response = await client.models.generateContent({
-          model: MODEL_NAME,
-          contents: [
+        const parsed = await callGeminiWithFallback(
+          [
             {
               role: "user",
               parts: [
@@ -1020,36 +1032,34 @@ async function startServer() {
               ],
             },
           ],
-          config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                nome: { type: Type.STRING },
-                valor: { type: Type.NUMBER },
-                vencimento: { type: Type.STRING },
-                mes: { type: Type.INTEGER },
-                ano: { type: Type.INTEGER },
-                tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
-                identificacaoGrcp: { type: Type.STRING },
-              },
-              required: ["valor", "identificacaoGrcp"],
+          {
+            type: Type.OBJECT,
+            properties: {
+              nome: { type: Type.STRING },
+              valor: { type: Type.NUMBER },
+              vencimento: { type: Type.STRING },
+              mes: { type: Type.INTEGER },
+              ano: { type: Type.INTEGER },
+              tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
+              identificacaoGrcp: { type: Type.STRING },
             },
-          },
-        });
-
-        const text = response.text;
-        console.log("[Backend AI] Result (OneDrive Guia):", text);
-        if (text) {
-          const parsed = JSON.parse(text);
-          return res.json(parsed);
-        }
-        throw new Error("Resposta da IA vazia");
+            required: ["valor", "identificacaoGrcp"],
+          }
+        );
+        return res.json(parsed);
       }
     } catch (error: any) {
       console.error("[Backend AI] Erro na extração do OneDrive:", error);
-      res.status(500).json({ error: error.message || "Erro para extrair arquivo do OneDrive com Gemini" });
+      let cleanMsg = "Erro para extrair arquivo do OneDrive com Gemini";
+      if (error?.message) {
+        try {
+          const parsed = JSON.parse(error.message);
+          cleanMsg = parsed?.error?.message || error.message;
+        } catch (_) {
+          cleanMsg = error.message;
+        }
+      }
+      res.status(500).json({ error: cleanMsg });
     }
   });
 
@@ -1066,7 +1076,7 @@ async function startServer() {
         return res.status(500).json({ error: "GEMINI_API_KEY não configurada no servidor" });
       }
 
-      const { GoogleGenAI, Type, ThinkingLevel } = await import("@google/genai");
+      const { GoogleGenAI, Type } = await import("@google/genai");
       const client = new GoogleGenAI({
         apiKey: geminiApiKey,
         httpOptions: {
@@ -1076,13 +1086,37 @@ async function startServer() {
         },
       });
 
-      const MODEL_NAME = "gemini-3.5-flash";
+      const callGeminiWithFallback = async (contents: any, schema: any) => {
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
+        let lastError: any = null;
+
+        for (const model of candidateModels) {
+          try {
+            console.log(`[Backend AI] Tentando extração com modelo: ${model}`);
+            const response = await client.models.generateContent({
+              model,
+              contents,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: schema,
+              },
+            });
+            const text = response.text;
+            if (text) {
+              return JSON.parse(text);
+            }
+          } catch (err: any) {
+            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}:`, err?.message || err);
+            lastError = err;
+          }
+        }
+        throw lastError || new Error("Não foi possível extrair os dados do arquivo via IA.");
+      };
 
       if (type === "comprovante") {
         console.log(`[Backend AI] Extracting COMPROVANTE: ${filename}`);
-        const response = await client.models.generateContent({
-          model: MODEL_NAME,
-          contents: [
+        const parsed = await callGeminiWithFallback(
+          [
             {
               role: "user",
               parts: [
@@ -1107,33 +1141,21 @@ async function startServer() {
               ],
             },
           ],
-          config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                valorPago: { type: Type.NUMBER },
-                dataPagamento: { type: Type.STRING },
-                identificacaoGrcp: { type: Type.STRING },
-              },
-              required: ["valorPago"],
+          {
+            type: Type.OBJECT,
+            properties: {
+              valorPago: { type: Type.NUMBER },
+              dataPagamento: { type: Type.STRING },
+              identificacaoGrcp: { type: Type.STRING },
             },
-          },
-        });
-
-        const text = response.text;
-        console.log("[Backend AI] Result (Comprovante):", text);
-        if (text) {
-          const parsed = JSON.parse(text);
-          return res.json(parsed);
-        }
-        throw new Error("Resposta da IA vazia");
+            required: ["valorPago"],
+          }
+        );
+        return res.json(parsed);
       } else {
         console.log(`[Backend AI] Extracting GUIA: ${filename}`);
-        const response = await client.models.generateContent({
-          model: MODEL_NAME,
-          contents: [
+        const parsed = await callGeminiWithFallback(
+          [
             {
               role: "user",
               parts: [
@@ -1161,36 +1183,34 @@ async function startServer() {
               ],
             },
           ],
-          config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                nome: { type: Type.STRING },
-                valor: { type: Type.NUMBER },
-                vencimento: { type: Type.STRING },
-                mes: { type: Type.INTEGER },
-                ano: { type: Type.INTEGER },
-                tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
-                identificacaoGrcp: { type: Type.STRING },
-              },
-              required: ["valor", "identificacaoGrcp"],
+          {
+            type: Type.OBJECT,
+            properties: {
+              nome: { type: Type.STRING },
+              valor: { type: Type.NUMBER },
+              vencimento: { type: Type.STRING },
+              mes: { type: Type.INTEGER },
+              ano: { type: Type.INTEGER },
+              tipo: { type: Type.STRING, enum: ["patronal", "segurado"] },
+              identificacaoGrcp: { type: Type.STRING },
             },
-          },
-        });
-
-        const text = response.text;
-        console.log("[Backend AI] Result (Guia):", text);
-        if (text) {
-          const parsed = JSON.parse(text);
-          return res.json(parsed);
-        }
-        throw new Error("Resposta da IA vazia");
+            required: ["valor", "identificacaoGrcp"],
+          }
+        );
+        return res.json(parsed);
       }
     } catch (error: any) {
       console.error("[Backend AI] Erro na extração:", error);
-      res.status(500).json({ error: error.message || "Erro desconhecido na extração com Gemini" });
+      let cleanMsg = "Erro desconhecido na extração com Gemini";
+      if (error?.message) {
+        try {
+          const parsed = JSON.parse(error.message);
+          cleanMsg = parsed?.error?.message || error.message;
+        } catch (_) {
+          cleanMsg = error.message;
+        }
+      }
+      res.status(500).json({ error: cleanMsg });
     }
   });
 
