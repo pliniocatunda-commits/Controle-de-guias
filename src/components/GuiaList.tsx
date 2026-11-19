@@ -52,16 +52,25 @@ import { onedriveService, extractOneDriveItemId } from "../services/onedriveServ
 // Helper functions for BRL currency formatting and parsing
 const parseBRLToFloat = (value: string | number | undefined | null): number => {
   if (value === undefined || value === null) return 0;
-  if (typeof value === "number") return value;
-  const clean = value.replace(/\./g, "").replace(",", ".");
-  return parseFloat(clean) || 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
+  const trimmed = value.replace(/R\$\s?/gi, "").trim();
+  if (!trimmed) return 0;
+  if (trimmed.includes(",")) {
+    const clean = trimmed.replace(/\./g, "").replace(",", ".");
+    return parseFloat(clean) || 0;
+  }
+  const dotParts = trimmed.split(".");
+  if (
+    dotParts.length > 2 ||
+    (dotParts.length === 2 && dotParts[1].length === 3 && dotParts[0].length >= 1)
+  ) {
+    return parseFloat(trimmed.replace(/\./g, "")) || 0;
+  }
+  return parseFloat(trimmed) || 0;
 };
 
 const normalizeValue = (val: number | undefined | null): number => {
-  if (val === undefined || val === null) return 0;
-  if (val > 0 && val < 120) {
-    return val * 1000;
-  }
+  if (val === undefined || val === null || isNaN(val)) return 0;
   return val;
 };
 
@@ -76,8 +85,9 @@ const normalizeGuia = (g: any): Guia => {
 
 const formatBRL = (value: number | string | undefined | null): string => {
   if (value === undefined || value === null) return "0,00";
-  let numValue = typeof value === "string" ? parseBRLToFloat(value) : value;
-  numValue = normalizeValue(numValue);
+  const numValue = normalizeValue(
+    typeof value === "string" ? parseBRLToFloat(value) : value,
+  );
   return numValue.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -975,6 +985,13 @@ export default function GuiaList({
 
     if (existingGuia) {
       handleInlineUpdate(existingGuia.id, field, value, debounceMs);
+      return;
+    }
+
+    if (field === "valor") {
+      const parsedVal = typeof value === "number" ? value : parseBRLToFloat(value);
+      if (parsedVal <= 0) return;
+    } else if (field === "identificacaoGrcp" && !String(value || "").trim()) {
       return;
     }
 

@@ -1,7 +1,7 @@
 /**
  * Serviço para interagir com a API do OneDrive via Backend ou diretamente via Cliente-Side
  */
-import { db, runWithTimeout } from '../lib/firebase';
+import { auth, db, runWithTimeout } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export interface OneDriveUser {
@@ -72,12 +72,28 @@ export async function saveOneDriveConfig(config: OneDriveConfig): Promise<void> 
         clientSecret: config.clientSecret ? config.clientSecret.trim() : '',
         tenant: config.tenant ? config.tenant.trim() : 'common',
         updatedAt: new Date().toISOString()
-      }),
+      }, { merge: true }),
       15000,
       'Não foi possível salvar no Firebase. Verifique se o serviço "Cloud Firestore" está ATIVADO (criado) no console do seu projeto Firebase (ipmeusebio-e02e4) e se você criou a base de dados padrão no modo de teste.'
     );
   } catch (err: any) {
     throw new Error(err.message || 'Erro ao salvar configurações no Firestore.');
+  }
+}
+
+export async function saveOneDriveTokensToFirestore(accessToken: string, refreshToken?: string | null): Promise<void> {
+  try {
+    if (!auth.currentUser) return;
+    const payload: Record<string, string> = {
+      accessToken,
+      updatedAt: new Date().toISOString(),
+    };
+    if (refreshToken) {
+      payload.refreshToken = refreshToken;
+    }
+    await setDoc(doc(db, 'config', 'onedrive'), payload, { merge: true });
+  } catch {
+    // Silencioso para usuários sem permissão de admin em config/onedrive
   }
 }
 
@@ -93,6 +109,16 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
   }
   if (refreshToken) {
     headers['X-OneDrive-Refresh-Token'] = refreshToken;
+  }
+  if (!url.startsWith('https://')) {
+    try {
+      const fbToken = await auth.currentUser?.getIdToken();
+      if (fbToken) {
+        headers['X-Firebase-Token'] = fbToken;
+      }
+    } catch {
+      // ignora falha ao obter token do Firebase
+    }
   }
 
   // Se o backend principal não estiver de pé ou se estivermos rodando no cliente diretamente,
@@ -161,6 +187,7 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
             if (refreshData.refresh_token) {
               localStorage.setItem('onedrive_refresh_token', refreshData.refresh_token);
             }
+            void saveOneDriveTokensToFirestore(refreshData.access_token, refreshData.refresh_token);
             
             // Refaz a chamada original com o novo token de acesso
             headers['Authorization'] = `Bearer ${refreshData.access_token}`;
@@ -179,6 +206,7 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
 
   if (newAccessToken) {
     localStorage.setItem('onedrive_token', newAccessToken);
+    void saveOneDriveTokensToFirestore(newAccessToken, newRefreshToken);
   }
   if (newRefreshToken) {
     localStorage.setItem('onedrive_refresh_token', newRefreshToken);

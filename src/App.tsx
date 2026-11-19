@@ -470,6 +470,9 @@ export default function App() {
         const { token, refreshToken } = event.data;
         if (token) {
           localStorage.setItem('onedrive_token', token);
+          import('./services/onedriveService').then(({ saveOneDriveTokensToFirestore }) => {
+            void saveOneDriveTokensToFirestore(token, refreshToken);
+          }).catch(() => {});
         }
         if (refreshToken) {
           localStorage.setItem('onedrive_refresh_token', refreshToken);

@@ -40,29 +40,26 @@ const normalizeValue = (val: number | string | undefined | null): number => {
   if (val === undefined || val === null) return 0;
   let num: number;
   if (typeof val === 'string') {
-    // Clean string by removing "R$", space separators, and converting BRL format to standard float representation
     const clean = val.replace(/R\$\s?/gi, "").trim();
     if (!clean) return 0;
-    
-    // Check if it uses BRL structure (has dot as thousand sep and comma as decimal separator)
-    if (clean.includes(',') && clean.includes('.')) {
+    if (clean.includes(',')) {
       num = parseFloat(clean.replace(/\./g, "").replace(",", ".")) || 0;
-    } else if (clean.includes(',')) {
-      num = parseFloat(clean.replace(",", ".")) || 0;
     } else {
-      num = parseFloat(clean) || 0;
+      const dotParts = clean.split('.');
+      if (
+        dotParts.length > 2 ||
+        (dotParts.length === 2 && dotParts[1].length === 3 && dotParts[0].length >= 1)
+      ) {
+        num = parseFloat(clean.replace(/\./g, "")) || 0;
+      } else {
+        num = parseFloat(clean) || 0;
+      }
     }
   } else {
     num = val;
   }
-  
-  if (isNaN(num)) return 0;
-  
-  // If the value is between 0 and 120, it represents thousands (e.g. 3.26 -> 3260, 45.4 -> 45400)
-  if (num > 0 && num < 120) {
-    num = num * 1000;
-  }
-  return num;
+
+  return isNaN(num) ? 0 : num;
 };
 
 export default function Dashboard() {
@@ -160,13 +157,25 @@ export default function Dashboard() {
     return deptSecMap.get(departamentoId) === selectedSecretariaId;
   };
 
+  const isGuiaEfetiva = (g: Guia): boolean => {
+    const hasGuiaFile = Boolean(g.urlGuia || (g as any).onedriveGuiaId);
+    const hasValor = (g.valor || 0) > 0;
+    const hasComprovanteOrPago = Boolean(
+      g.urlComprovante ||
+      (g as any).onedriveComprovanteId ||
+      (g.valorPago || 0) > 0 ||
+      g.status === 'pago'
+    );
+    return hasGuiaFile || hasValor || hasComprovanteOrPago;
+  };
+
   // Filter lists based on selected criteria with robust type safety
   const filteredGuias = allGuias.filter(g => {
     const matchMes = selectedMes === 'todos' || Number(g.mes) === Number(selectedMes);
     const matchAno = selectedAno === 'todos' || Number(g.ano) === Number(selectedAno);
     const matchRegime = selectedRegime === 'todos' || (g.regime || 'capitalizado') === selectedRegime;
     const matchSecretaria = matchesSecretaria(g.departamentoId);
-    return matchMes && matchAno && matchRegime && matchSecretaria;
+    return matchMes && matchAno && matchRegime && matchSecretaria && isGuiaEfetiva(g);
   });
 
   const filteredComprovantes = allComprovantes.filter(c => {
@@ -220,10 +229,13 @@ export default function Dashboard() {
     .map(([url, list]) => ({ url, list }));
 
   // Track discrepancy of documents
+  const guiasSemComprovante = filteredGuias.filter(
+    g => g.status !== 'pago' || (!g.urlComprovante && !(g as any).onedriveComprovanteId)
+  );
   const guiasPendentes = filteredGuias.filter(g => g.status !== 'pago');
   const totalPendentes = guiasPendentes.length;
-  const temDivergencia = totalGuias !== totalComprovantes || totalPendentes > 0;
-  const difQuantidade = Math.abs(totalGuias - totalComprovantes);
+  const temDivergencia = totalGuias !== totalComprovantes || guiasSemComprovante.length > 0;
+  const difQuantidade = Math.abs(totalGuias - totalComprovantes) || guiasSemComprovante.length;
   const valorPendenteTotal = guiasPendentes.reduce((acc, g) => acc + (g.valor || 0), 0);
 
   const valorTotalPago = filteredGuias
@@ -859,7 +871,7 @@ export default function Dashboard() {
                   <div className="p-4 rounded-xl bg-rose-50 border border-rose-100">
                     <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">Falta Comprovante</p>
                     <p className="text-2xl font-black text-rose-800 mt-1">
-                      {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length}
+                      {guiasSemComprovante.length}
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
@@ -874,12 +886,12 @@ export default function Dashboard() {
                 <section className="space-y-3">
                   <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-1.5 border-b pb-2">
                     <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
-                    1. Guias sem Comprovante de Pagamento ({filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length})
+                    1. Guias sem Comprovante de Pagamento ({guiasSemComprovante.length})
                   </h4>
                   
-                  {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).length > 0 ? (
+                  {guiasSemComprovante.length > 0 ? (
                     <div className="divide-y divide-gray-100 max-h-[250px] overflow-y-auto border border-gray-100 rounded-2xl bg-white shadow-sm">
-                      {filteredGuias.filter(g => g.status !== 'pago' || !g.urlComprovante).map(g => {
+                      {guiasSemComprovante.map(g => {
                         const dept = departamentos.find(d => d.id === g.departamentoId);
                         const sec = dept ? secretarias.find(s => s.id === dept.secretariaId) : null;
                         return (

@@ -13,8 +13,22 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "25mb" }));
   app.use(cookieParser());
+
+  // Helper para extrair mensagem limpa de erros JSON (evita dumps multilinha "{ \"error\": {" nos logs)
+  const extractCleanError = (errOrText: any): string => {
+    const raw = typeof errOrText === "string" ? errOrText : (errOrText?.message || String(errOrText));
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.error?.message) {
+        return `${parsed.error.code || parsed.error.status || "API_ERROR"}: ${parsed.error.message}`;
+      }
+      if (parsed?.error_description) return parsed.error_description;
+      if (typeof parsed?.error === "string") return parsed.error;
+    } catch (_) {}
+    return String(raw).replace(/\s+/g, " ").trim();
+  };
 
   // Helper fetch de alta confiabilidade com timeout integrado para evitar travamentos ou gargalos na gateway do Cloud Run
   const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> => {
@@ -110,10 +124,11 @@ async function startServer() {
         refreshToken = fields.refreshToken?.stringValue?.trim() || "";
         console.log("[Backend REST] Configuração do OneDrive carregada com sucesso do Firestore.");
       } else {
-        console.warn(`[Backend REST] Falha ao sincronizar via Firestore (Status ${fsRes.status}):`, await fsRes.text());
+        const errBody = await fsRes.text();
+        console.warn(`[Backend REST] Aviso ao sincronizar via Firestore (Status ${fsRes.status}): ${extractCleanError(errBody)}`);
       }
     } catch (err) {
-      console.error("[Backend REST] Exceção na busca da configuração do OneDrive:", err);
+      console.error(`[Backend REST] Exceção na busca da configuração do OneDrive: ${extractCleanError(err)}`);
     }
 
     // Se as credenciais não vierem do Firestore, cai de volta para as variáveis de ambiente
@@ -140,7 +155,20 @@ async function startServer() {
     return onedriveCache;
   };
 
-  const saveOneDriveTokens = async (accessToken: string, refreshToken?: string) => {
+  const saveOneDriveTokens = async (accessToken: string, refreshToken?: string, firebaseIdToken?: string) => {
+    // Atualiza imediatamente o cache em memória (mesmo se ainda não tiver sido populado)
+    if (onedriveCache) {
+      onedriveCache.accessToken = accessToken;
+      if (refreshToken) onedriveCache.refreshToken = refreshToken;
+      onedriveCache.loadedAt = Date.now();
+    }
+
+    // Sem um token JWT de administrador do Firebase, o Firestore REST API bloqueia escrita em config/onedrive com 403.
+    // Nesse caso, o cliente autenticado sincroniza o token via SDK e o cache em memória já mantém o backend operacional.
+    if (!firebaseIdToken) {
+      return;
+    }
+
     try {
       let projectId = "ai-studio-9073c76a-ddf8-411b-b0ca-434330bbd34b"; // default fallback
       let databaseId = "(default)";
@@ -155,31 +183,16 @@ async function startServer() {
           if (fbConfig.apiKey) apiKey = fbConfig.apiKey;
         }
       } catch (err) {
-        console.warn("[Backend Config] Falha ao ler firebase-applet-config.json no salvamento:", err);
+        console.warn("[Backend Config] Falha ao ler firebase-applet-config.json no salvamento:", extractCleanError(err));
       }
 
       const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/config/onedrive`;
-      
-      // Carrega o estado atual para não sobrescrever clientId/clientSecret se existirem apenas no Firestore
-      let getUrl = url;
-      if (apiKey) {
-        getUrl += `?key=${apiKey}`;
-      }
-
-      let currentFields: any = {};
-      try {
-        const currentRes = await fetchWithTimeout(getUrl, {}, 4000);
-        if (currentRes.ok) {
-          const currentData = await currentRes.json();
-          currentFields = currentData.fields || {};
-        }
-      } catch (fetchErr) {
-        console.warn("[Backend REST] Não foi possível carregar campos atuais para mesclagem no salvamento:", fetchErr);
-      }
+      const authHeaders: Record<string, string> = {
+        Authorization: `Bearer ${firebaseIdToken}`,
+      };
 
       // Atualiza os campos relevantes em formato de chave de documento do Firestore REST API
       const updatedFields: any = {
-        ...currentFields,
         accessToken: { stringValue: accessToken },
       };
 
@@ -195,7 +208,10 @@ async function startServer() {
 
       const patchRes = await fetchWithTimeout(patchUrl, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify({
           fields: updatedFields
         })
@@ -203,22 +219,16 @@ async function startServer() {
 
       if (patchRes.ok) {
         console.log("[Backend REST] Tokens do OneDrive salvos com sucesso no Firestore.");
-      } else {
-        console.error("[Backend REST] Falha ao persistir novos tokens no Firestore. Status:", patchRes.status, await patchRes.text());
-      }
-
-      // Atualiza o cache em memória após persistir
-      if (onedriveCache) {
-        onedriveCache.accessToken = accessToken;
-        if (refreshToken) onedriveCache.refreshToken = refreshToken;
-        onedriveCache.loadedAt = Date.now();
+      } else if (patchRes.status !== 403) {
+        const errBody = await patchRes.text();
+        console.warn(`[Backend REST] Aviso ao persistir tokens no Firestore (Status ${patchRes.status}): ${extractCleanError(errBody)}`);
       }
     } catch (err) {
-      console.error("[Backend REST] Exceção global ao salvar tokens no Firestore:", err);
+      console.warn(`[Backend REST] Aviso ao salvar tokens no Firestore: ${extractCleanError(err)}`);
     }
   };
 
-  const refreshOneDriveToken = async (rToken: string): Promise<string | null> => {
+  const refreshOneDriveToken = async (rToken: string, firebaseIdToken?: string): Promise<string | null> => {
     try {
       console.log("[Backend] Renovando token do OneDrive via refresh_token...");
       const config = await getOneDriveConfig();
@@ -235,28 +245,28 @@ async function startServer() {
 
       const data = await response.json();
       if (data.error) {
-        console.error("[Backend] Erro ao renovar token com refresh_token:", data.error_description || data.error);
+        console.warn(`[Backend] Aviso ao renovar token com refresh_token: ${data.error_description || data.error}`);
         return null;
       }
 
       const newAccessToken = data.access_token;
       const newRefreshToken = data.refresh_token || rToken;
 
-      await saveOneDriveTokens(newAccessToken, newRefreshToken);
+      await saveOneDriveTokens(newAccessToken, newRefreshToken, firebaseIdToken);
       return newAccessToken;
     } catch (err) {
-      console.error("[Backend] Erro excepcional ao renovar token OneDrive:", err);
+      console.warn(`[Backend] Aviso ao renovar token OneDrive: ${extractCleanError(err)}`);
       return null;
     }
   };
 
-  const getValidOneDriveToken = async (): Promise<string | null> => {
+  const getValidOneDriveToken = async (firebaseIdToken?: string): Promise<string | null> => {
     const config = await getOneDriveConfig();
     let token = config.accessToken;
 
     if (!token || isTokenExpired(token)) {
       if (config.refreshToken) {
-        token = await refreshOneDriveToken(config.refreshToken);
+        token = await refreshOneDriveToken(config.refreshToken, firebaseIdToken);
       } else {
         token = null;
       }
@@ -662,7 +672,8 @@ async function startServer() {
 
     // 3. Fallback: Se não tem token individual, busca o token global do OneDrive guardado no Firestore
     console.log("[getValidToken] Token individual ausente ou expirado. Buscando token global do Firestore...");
-    const globalToken = await getValidOneDriveToken();
+    const firebaseIdToken = (req.headers["x-firebase-token"] as string) || undefined;
+    const globalToken = await getValidOneDriveToken(firebaseIdToken);
     if (globalToken) {
       return { token: globalToken };
     }
@@ -936,7 +947,7 @@ async function startServer() {
       });
 
       const callGeminiWithFallback = async (contents: any, schema: any) => {
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
+        const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
         let lastError: any = null;
 
         for (const model of candidateModels) {
@@ -955,7 +966,7 @@ async function startServer() {
               return JSON.parse(text);
             }
           } catch (err: any) {
-            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}:`, err?.message || err);
+            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}: ${extractCleanError(err)}`);
             lastError = err;
           }
         }
@@ -1049,16 +1060,8 @@ async function startServer() {
         return res.json(parsed);
       }
     } catch (error: any) {
-      console.error("[Backend AI] Erro na extração do OneDrive:", error);
-      let cleanMsg = "Erro para extrair arquivo do OneDrive com Gemini";
-      if (error?.message) {
-        try {
-          const parsed = JSON.parse(error.message);
-          cleanMsg = parsed?.error?.message || error.message;
-        } catch (_) {
-          cleanMsg = error.message;
-        }
-      }
+      const cleanMsg = extractCleanError(error) || "Erro para extrair arquivo do OneDrive com Gemini";
+      console.error(`[Backend AI] Erro na extração do OneDrive: ${cleanMsg}`);
       res.status(500).json({ error: cleanMsg });
     }
   });
@@ -1087,7 +1090,7 @@ async function startServer() {
       });
 
       const callGeminiWithFallback = async (contents: any, schema: any) => {
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
+        const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
         let lastError: any = null;
 
         for (const model of candidateModels) {
@@ -1106,7 +1109,7 @@ async function startServer() {
               return JSON.parse(text);
             }
           } catch (err: any) {
-            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}:`, err?.message || err);
+            console.warn(`[Backend AI] Falha ao extrair com modelo ${model}: ${extractCleanError(err)}`);
             lastError = err;
           }
         }
@@ -1200,16 +1203,8 @@ async function startServer() {
         return res.json(parsed);
       }
     } catch (error: any) {
-      console.error("[Backend AI] Erro na extração:", error);
-      let cleanMsg = "Erro desconhecido na extração com Gemini";
-      if (error?.message) {
-        try {
-          const parsed = JSON.parse(error.message);
-          cleanMsg = parsed?.error?.message || error.message;
-        } catch (_) {
-          cleanMsg = error.message;
-        }
-      }
+      const cleanMsg = extractCleanError(error) || "Erro desconhecido na extração com Gemini";
+      console.error(`[Backend AI] Erro na extração: ${cleanMsg}`);
       res.status(500).json({ error: cleanMsg });
     }
   });
